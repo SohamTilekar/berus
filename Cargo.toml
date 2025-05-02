@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+eframe = "0.27.2"
+url = "2.4"               # For URL parsing
+native-tls = "0.2"        # For HTTPS/TLS
