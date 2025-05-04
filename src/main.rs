@@ -1,7 +1,9 @@
 // main.rs
 mod browser;
+mod css_parser;
+mod html_parser;
+mod layout;
 mod network;
-mod parser;
 
 use browser::BrowserApp;
 use eframe::egui;

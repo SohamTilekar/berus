@@ -23,7 +23,7 @@ impl Error for BrowserError {}
 
 #[derive(Debug)]
 pub struct URL {
-    scheme: String,
+    scheme: String, // http or https
     host: String,
     port: u16,
     path: String,
@@ -150,12 +150,12 @@ impl URL {
 
         // The socket is automatically closed when the `stream` variable goes out of scope
         // due to Rust's RAII (Resource Acquisition Is Initialization). No explicit `close()` needed.
-
         Ok(body) // Return the body as a String
     }
 }
 
 pub fn load_url(url_str: &str) -> Result<String, Box<dyn Error>> {
+    println!("URL: {}", url_str);
     let url = URL::new(url_str)?;
     let body = url.request()?;
     Ok(body)
