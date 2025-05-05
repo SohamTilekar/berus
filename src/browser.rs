@@ -464,10 +464,10 @@ fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &RenderContext) {
                 HtmlTag::Hr => {
                     ui.separator();
                 }
-                HtmlTag::Custom(name) => {
+                HtmlTag::Custom(_) => {
                     // Handle unknown tags - maybe render as inline? Or block?
                     // Default to inline for now.
-                    eprintln!("Rendering unknown tag: <{}>", name);
+                    // eprintln!("Rendering unknown tag: <{}>", name);
                 }
                 _ => {}
             }

@@ -103,15 +103,15 @@ impl HtmlNode {
         }
     }
 
-    /// Public entry: apply rules and inheritance
-    pub fn stylize(&mut self, rules: &[CssRule]) {
+    /// apply rules and inheritance
+    pub fn stylize(&mut self, rules: &Vec<CssRule>) {
         self.stylize_recursive(rules, None);
     }
 
     /// Recursive worker: apply rules with specificity and inherit from parent
     fn stylize_recursive(
         &mut self,
-        rules: &[CssRule],
+        rules: &Vec<CssRule>,
         parent_style: Option<&HashMap<String, StyleProperty>>,
     ) {
         // Only element nodes get rules

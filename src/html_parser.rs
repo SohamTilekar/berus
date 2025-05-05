@@ -1,5 +1,6 @@
 // parser.rs
-use crate::layout::{HtmlNode, HtmlTag, NodeType};
+use crate::css_parser::parse_css;
+use crate::layout::{CssRule, HtmlNode, HtmlTag, NodeType};
 use std::collections::HashMap;
 
 /// Parse an HTML string into a tree of HtmlNode, discarding comments and doctype.
@@ -35,21 +36,33 @@ pub fn parse_html(input: &str) -> HtmlNode {
     }
 }
 
-/// Print the HtmlNode tree to stdout
+/// Prints the HTML tree, including attributes and CSS style properties.
 pub fn print_tree(node: &HtmlNode) {
     fn rec(node: &HtmlNode, indent: usize) {
         let pad = "  ".repeat(indent);
         match &node.node_type {
             NodeType::Element(tag) => {
+                // Print opening tag with attributes
                 if node.attributes.is_empty() {
                     eprintln!("{}<{:?}>", pad, tag);
                 } else {
                     eprintln!("{}<{:?} {:?}>", pad, tag, node.attributes);
                 }
+
+                // Print CSS style properties, if any
+                println!("{:?} Tag style: {}", tag, !node.style.is_empty());
+                if !node.style.is_empty() {
+                    for (prop_name, prop_value) in &node.style {
+                        eprintln!("{}  {}: {:?}", pad, prop_name, prop_value);
+                    }
+                }
+
+                // Recurse into children
                 for child in &node.children {
                     rec(child, indent + 1);
                 }
-                // Don't print closing tag for void elements visually
+
+                // Print closing tag for non-void elements
                 if !is_void_element(tag) {
                     eprintln!("{}</{:?}>", pad, tag);
                 }
@@ -59,7 +72,7 @@ pub fn print_tree(node: &HtmlNode) {
                 if !trimmed.is_empty() {
                     eprintln!("{}TEXT: \"{}\"", pad, trimmed);
                 }
-            } // Removed Comment and Doctype cases
+            }
         }
     }
     rec(node, 0);
@@ -86,36 +99,31 @@ pub fn cleanup_tree(mut root: HtmlNode) -> HtmlNode {
     };
 
     if root_tag_name.is_none() {
-        // If the root wasn't an html element, wrap it
         let new_root = HtmlNode {
             node_type: NodeType::Element(HtmlTag::Html),
             style: HashMap::new(),
             attributes: HashMap::new(),
-            children: vec![root], // Put the original root inside
+            children: vec![root],
         };
-        // Now try cleaning up the new_root's children (which contains the old root)
         return cleanup_tree(new_root);
     }
 
-    // Ensure the root node type is the canonical HtmlTag::Html
     root.node_type = NodeType::Element(HtmlTag::Html);
 
     let mut head_node: Option<HtmlNode> = None;
     let mut body_node: Option<HtmlNode> = None;
     let mut other_children: Vec<HtmlNode> = Vec::new();
+    let mut style_contents: Vec<String> = Vec::new();
     let mut head_found = false;
     let mut body_found = false;
 
-    // Partition children into head, body, or others (to be put in body)
     for child in root.children.drain(..) {
-        // Skip whitespace-only text nodes between elements at this level
         if let NodeType::Text(t) = &child.node_type {
             if t.trim().is_empty() {
                 continue;
             }
         }
 
-        // Only consider Element nodes for head/body placement
         if let NodeType::Element(tag) = &child.node_type {
             match tag {
                 HtmlTag::Head if !head_found => {
@@ -126,50 +134,113 @@ pub fn cleanup_tree(mut root: HtmlNode) -> HtmlNode {
                     body_node = Some(child);
                     body_found = true;
                 }
-                // Handle custom tags that might be head/body case-insensitively
                 HtmlTag::Custom(name) if !head_found && name.eq_ignore_ascii_case("head") => {
                     head_node = Some(HtmlNode {
-                        node_type: NodeType::Element(HtmlTag::Head), // Canonicalize
+                        node_type: NodeType::Element(HtmlTag::Head),
                         ..child
                     });
                     head_found = true;
                 }
                 HtmlTag::Custom(name) if !body_found && name.eq_ignore_ascii_case("body") => {
                     body_node = Some(HtmlNode {
-                        node_type: NodeType::Element(HtmlTag::Body), // Canonicalize
+                        node_type: NodeType::Element(HtmlTag::Body),
                         ..child
                     });
                     body_found = true;
                 }
-                // Ignore duplicate head/body tags
                 HtmlTag::Head | HtmlTag::Body => {}
                 HtmlTag::Custom(name)
                     if name.eq_ignore_ascii_case("head") || name.eq_ignore_ascii_case("body") => {}
-
-                // Everything else (including text nodes that weren't skipped) goes into 'other'
+                HtmlTag::Style => {
+                    if let Some(NodeType::Text(style_text)) =
+                        child.children.get(0).map(|n| &n.node_type)
+                    {
+                        style_contents.push(style_text.clone());
+                    }
+                    // Don't push this style tag into children — it's being merged
+                }
                 _ => other_children.push(child),
             }
         } else {
-            // Non-element nodes (Text) outside head/body go into 'other' (-> body)
             other_children.push(child);
         }
     }
 
-    // Create head if it doesn't exist
+    // Handle <style> tags inside head and body
+    let mut collect_styles = |node: &mut Option<HtmlNode>| {
+        if let Some(n) = node {
+            let mut retained_children = Vec::new();
+            for child in n.children.drain(..) {
+                if let NodeType::Element(HtmlTag::Style) = &child.node_type {
+                    if let Some(NodeType::Text(style_text)) =
+                        child.children.get(0).map(|n| &n.node_type)
+                    {
+                        style_contents.push(style_text.clone());
+                    }
+                } else {
+                    retained_children.push(child);
+                }
+            }
+            n.children = retained_children;
+        }
+    };
+
+    collect_styles(&mut head_node);
+    collect_styles(&mut body_node);
+
     let final_head =
         head_node.unwrap_or_else(|| HtmlNode::new_element(HtmlTag::Head, HashMap::new(), vec![]));
-
-    // Create body if it doesn't exist, or add other children to existing body
     let mut final_body =
         body_node.unwrap_or_else(|| HtmlNode::new_element(HtmlTag::Body, HashMap::new(), vec![]));
 
-    // Add orphaned children to the *beginning* of the body's children.
     let mut body_children = other_children;
     body_children.append(&mut final_body.children);
     final_body.children = body_children;
 
-    // Ensure head comes before body
+    // Create merged <style> tag if there are styles to insert
+    // let mut final_head = final_head;
+    // if !style_contents.is_empty() {
+    //     let mut childrens: Vec<HtmlNode> = vec![];
+    //     for style_text in style_contents {
+    //         childrens.push(HtmlNode {
+    //             node_type: NodeType::Text(style_text),
+    //             style: HashMap::new(),
+    //             attributes: HashMap::new(),
+    //             children: vec![],
+    //         });
+    //     }
+    // let style_node = HtmlNode {
+    //     node_type: NodeType::Element(HtmlTag::Style),
+    //     style: HashMap::new(),
+    //     attributes: HashMap::new(),
+    //     children: childrens,
+    // };
+    // final_head.children.insert(0, style_node);
+    // }
     root.children = vec![final_head, final_body];
+    if !style_contents.is_empty() {
+        let mut rules: Vec<CssRule> = vec![];
+        for style_text in style_contents {
+            rules.extend(parse_css(style_text.as_str()));
+        }
+        root.stylize(&rules);
+        for rule in rules {
+            println!();
+            println!("Selector is Empty: {}", rule.selectors.is_empty());
+            for selctor in rule.selectors {
+                match selctor {
+                    crate::layout::Selector::Universal => print!("* "),
+                    crate::layout::Selector::Class(s) => print!(".{} ", s),
+                    crate::layout::Selector::Id(s) => print!("#{} ", s),
+                }
+            }
+            print!("( \n");
+            for (name, property) in rule.properties {
+                println!("{}: {:?}", name, property)
+            }
+            print!(")\n")
+        }
+    }
     root
 }
 

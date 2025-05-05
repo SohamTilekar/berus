@@ -46,6 +46,9 @@ impl<'a> CssParser<'a> {
 
     /// Split and parse selectors
     fn parse_selectors(&self, text: &str) -> Vec<Selector> {
+        for t in text.split(',') {
+            println!("jadu: `{}`", t)
+        }
         text.split(',')
             .map(|s| s.trim())
             .filter_map(|s| match s {
