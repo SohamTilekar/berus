@@ -59,9 +59,10 @@ pub enum StyleProperty {
 
 #[derive(Debug, Clone)]
 pub enum Selector {
-    Universal,
-    Class(String),
-    Id(String),
+    Universal,     // * // All
+    Class(String), // #message, ...
+    Id(String),    // #message-box, ...
+    Type(String),  // H1, P, ...
 }
 
 #[derive(Debug, Clone)]
@@ -105,15 +106,11 @@ impl HtmlNode {
 
     /// apply rules and inheritance
     pub fn stylize(&mut self, rules: &Vec<CssRule>) {
-        self.stylize_recursive(rules, None);
+        self.stylize_recursive(rules);
     }
 
     /// Recursive worker: apply rules with specificity and inherit from parent
-    fn stylize_recursive(
-        &mut self,
-        rules: &Vec<CssRule>,
-        parent_style: Option<&HashMap<String, StyleProperty>>,
-    ) {
+    fn stylize_recursive(&mut self, rules: &Vec<CssRule>) {
         // Only element nodes get rules
         if let NodeType::Element(_) = self.node_type {
             // temp map: property -> (specificity, value)
@@ -127,8 +124,9 @@ impl HtmlNode {
                     if self.matches_selector(sel) {
                         let spec = match sel {
                             Selector::Universal => 0,
-                            Selector::Class(_) => 1,
-                            Selector::Id(_) => 2,
+                            Selector::Type(_) => 1,
+                            Selector::Class(_) => 2,
+                            Selector::Id(_) => 3,
                         };
                         rule_spec = Some(rule_spec.map_or(spec, |old| old.max(spec)));
                     }
@@ -150,33 +148,13 @@ impl HtmlNode {
             // write computed values into node.style
             self.style = computed.into_iter().map(|(k, (_spec, v))| (k, v)).collect();
 
-            // inherit properties from parent if missing
-            const INHERITED: &[&str] = &[
-                "color",
-                "font-size",
-                "font-family",
-                "font-weight",
-                "line-height",
-                "visibility",
-            ];
-            if let Some(parent_map) = parent_style {
-                for &prop in INHERITED {
-                    if !self.style.contains_key(prop) {
-                        if let Some(val) = parent_map.get(prop) {
-                            self.style.insert(prop.to_string(), val.clone());
-                        }
-                    }
-                }
+            // recurse for all children, passing this node's style as parent
+            for child in &mut self.children {
+                child.stylize_recursive(rules);
             }
-        }
-
-        // recurse for all children, passing this node's style as parent
-        for child in &mut self.children {
-            child.stylize_recursive(rules, Some(&self.style));
         }
     }
 
-    /// Does this node match a given selector?
     fn matches_selector(&self, selector: &Selector) -> bool {
         match selector {
             Selector::Universal => true,
@@ -185,6 +163,39 @@ impl HtmlNode {
                 .get("class")
                 .map_or(false, |cls| cls.split_whitespace().any(|c| c == name)),
             Selector::Id(id) => self.attributes.get("id").map_or(false, |v| v == id),
+            Selector::Type(s) => {
+                let s_lower = s.to_lowercase();
+                // Borrow node_type to avoid moving out
+                if let NodeType::Element(ref html_tag) = self.node_type {
+                    match html_tag {
+                        HtmlTag::Div => s_lower == "div",
+                        HtmlTag::Span => s_lower == "span",
+                        HtmlTag::P => s_lower == "p",
+                        HtmlTag::H1 => s_lower == "h1",
+                        HtmlTag::H2 => s_lower == "h2",
+                        HtmlTag::H3 => s_lower == "h3",
+                        HtmlTag::H4 => s_lower == "h4",
+                        HtmlTag::H5 => s_lower == "h5",
+                        HtmlTag::H6 => s_lower == "h6",
+                        HtmlTag::Strong => s_lower == "strong",
+                        HtmlTag::Small => s_lower == "small",
+                        HtmlTag::Big => s_lower == "big",
+                        HtmlTag::B => s_lower == "b",
+                        HtmlTag::I => s_lower == "i",
+                        HtmlTag::Br => s_lower == "br",
+                        HtmlTag::Hr => s_lower == "hr",
+                        HtmlTag::Body => s_lower == "body",
+                        HtmlTag::Head => s_lower == "head",
+                        HtmlTag::Title => s_lower == "title",
+                        HtmlTag::Html => s_lower == "html",
+                        HtmlTag::Script => s_lower == "script",
+                        HtmlTag::Style => s_lower == "style",
+                        HtmlTag::Custom(t) => t.to_lowercase() == s_lower,
+                    }
+                } else {
+                    false
+                }
+            }
         }
     }
 }

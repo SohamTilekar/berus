@@ -1,6 +1,6 @@
 // parser.rs
 use crate::css_parser::parse_css;
-use crate::layout::{CssRule, HtmlNode, HtmlTag, NodeType};
+use crate::layout::{CssRule, HtmlNode, HtmlTag, NodeType, Selector};
 use std::collections::HashMap;
 
 /// Parse an HTML string into a tree of HtmlNode, discarding comments and doctype.
@@ -50,7 +50,6 @@ pub fn print_tree(node: &HtmlNode) {
                 }
 
                 // Print CSS style properties, if any
-                println!("{:?} Tag style: {}", tag, !node.style.is_empty());
                 if !node.style.is_empty() {
                     for (prop_name, prop_value) in &node.style {
                         eprintln!("{}  {}: {:?}", pad, prop_name, prop_value);
@@ -226,12 +225,12 @@ pub fn cleanup_tree(mut root: HtmlNode) -> HtmlNode {
         root.stylize(&rules);
         for rule in rules {
             println!();
-            println!("Selector is Empty: {}", rule.selectors.is_empty());
             for selctor in rule.selectors {
                 match selctor {
-                    crate::layout::Selector::Universal => print!("* "),
-                    crate::layout::Selector::Class(s) => print!(".{} ", s),
-                    crate::layout::Selector::Id(s) => print!("#{} ", s),
+                    Selector::Universal => print!("* "),
+                    Selector::Class(s) => print!(".{} ", s),
+                    Selector::Id(s) => print!("#{} ", s),
+                    Selector::Type(s) => print!("{} ", s),
                 }
             }
             print!("( \n");

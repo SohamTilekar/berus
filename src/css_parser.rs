@@ -46,16 +46,13 @@ impl<'a> CssParser<'a> {
 
     /// Split and parse selectors
     fn parse_selectors(&self, text: &str) -> Vec<Selector> {
-        for t in text.split(',') {
-            println!("jadu: `{}`", t)
-        }
         text.split(',')
             .map(|s| s.trim())
             .filter_map(|s| match s {
                 "*" => Some(Selector::Universal),
                 _ if s.starts_with('.') => Some(Selector::Class(s[1..].to_string())),
                 _ if s.starts_with('#') => Some(Selector::Id(s[1..].to_string())),
-                _ => None,
+                _ => Some(Selector::Type(s.to_string())),
             })
             .collect()
     }
