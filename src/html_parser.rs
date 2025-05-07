@@ -438,7 +438,7 @@ impl<'a> Parser<'a> {
         while !self.eof() && self.current_char() != '<' {
             self.pos += 1;
         }
-        let text = self.input[start..self.pos].to_string();
+        let text = self.input[start..self.pos].trim().to_string();
         // Simple HTML entity decoding
         let decoded_text = text
             .replace("<", "<")
