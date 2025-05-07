@@ -67,10 +67,7 @@ pub fn print_tree(node: &HtmlNode) {
                 }
             }
             NodeType::Text(text) => {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    eprintln!("{}TEXT: \"{}\"", pad, trimmed);
-                }
+                eprintln!("{}TEXT: `{}`", pad, text);
             }
         }
     }

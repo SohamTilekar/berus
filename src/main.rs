@@ -16,8 +16,8 @@ fn main() -> Result<(), eframe::Error> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0]) // Initial window size
-            .with_title("Basic Rust Browser"), // Window title
+            .with_maximized(true)
+            .with_title("Berus Browser"),
         ..Default::default()
     };
 

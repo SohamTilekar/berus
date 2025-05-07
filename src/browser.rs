@@ -1,5 +1,5 @@
 // browser.rs
-use crate::html_parser::{self, print_tree};
+use crate::html_parser::{self};
 use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
 use eframe::egui;
@@ -336,7 +336,9 @@ impl eframe::App for BrowserApp {
                         ContentState::Loaded { root_node, .. } => {
                             // Start rendering the parsed HTML tree
                             let mut initial_context = RenderContext::default();
-                            render_node(ui, root_node, &mut initial_context);
+                            if let Some(body) = root_node.get_body() {
+                                render_node(ui, body, &mut initial_context);
+                            }
                         }
                     }
                     // Ensure the scroll area takes up available space
@@ -396,10 +398,23 @@ impl Default for RenderContext {
 fn is_inline(node: &HtmlNode) -> bool {
     match &node.node_type {
         NodeType::Text(_) => true,
-        NodeType::Element(tag) => matches!(
-            tag,
-            HtmlTag::B | HtmlTag::I | HtmlTag::U | HtmlTag::S | HtmlTag::W | HtmlTag::Br
-        ),
+        NodeType::Element(tag) => {
+            for (property_name, properties) in node.style.clone() {
+                if property_name == "display" {
+                    if let layout::StyleProperty::Keyword(display) = properties {
+                        if display == "block" {
+                            return false;
+                        } else if display == "inline" {
+                            return true;
+                        }
+                    }
+                }
+            }
+            matches!(
+                tag,
+                HtmlTag::B | HtmlTag::I | HtmlTag::U | HtmlTag::S | HtmlTag::W | HtmlTag::Br
+            )
+        }
     }
 }
 
@@ -407,19 +422,41 @@ fn is_inline(node: &HtmlNode) -> bool {
 /// automatically group inline runs into horizontal_wrapped.
 fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) {
     match &node.node_type {
-        // If this node itself is inline, we’ll let the
-        // parent’s grouping logic handle it; so do nothing here.
-        NodeType::Text(_)
-        | NodeType::Element(HtmlTag::B)
-        | NodeType::Element(HtmlTag::I)
-        | NodeType::Element(HtmlTag::U)
-        | NodeType::Element(HtmlTag::S)
-        | NodeType::Element(HtmlTag::W)
-        | NodeType::Element(HtmlTag::Br) => {}
-        // If it’s a block‑level element, you could adjust context here…
-        NodeType::Element(_) => {
-            // e.g. for <div> or <p> you might reset some context
+        NodeType::Text(text) => {
+            let mut rich = egui::RichText::new(text).size(context.font_size);
+            if context.bold {
+                rich = rich.strong();
+            }
+            if context.week {
+                rich = rich.weak();
+            }
+            if context.italic {
+                rich = rich.italics();
+            }
+            if context.underline {
+                rich = rich.underline();
+            }
+            if context.strikethrough {
+                rich = rich.strikethrough();
+            }
+            if let Some(ts) = &context.text_style {
+                rich = rich.text_style(ts.clone());
+            }
+            if let Some(ff) = &context.font_family {
+                rich = rich.family(ff.clone());
+            }
+            if let Some(c) = &context.text_color {
+                rich = rich.color(c.clone().to_ecolor());
+            }
+            ui.label(rich);
         }
+        NodeType::Element(HtmlTag::Br) => ui.end_row(),
+        NodeType::Element(HtmlTag::B) => context.bold = true,
+        NodeType::Element(HtmlTag::W) => context.week = true,
+        NodeType::Element(HtmlTag::I) => context.italic = true,
+        NodeType::Element(HtmlTag::S) => context.strikethrough = true,
+        NodeType::Element(HtmlTag::U) => context.underline = true,
+        _ => {}
     }
     for (property_name, properties) in node.style.clone() {
         if property_name == "text-color" {
@@ -434,7 +471,7 @@ fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) 
         if is_inline(&node.children[i]) {
             // start of an inline run
             let start = i;
-            while i < node.children.len() && is_inline(&node.children[i]) {
+            while i < node.children.len() {
                 i += 1;
             }
             let old_item_spacing = ui.style().spacing.item_spacing;
@@ -507,6 +544,12 @@ fn render_inline(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext
     // inline elements may have children too:
     for child in &node.children {
         let mut ctx = context.clone();
-        render_inline(ui, child, &mut ctx);
+        if is_inline(child) {
+            render_inline(ui, child, &mut ctx);
+        } else {
+            ui.vertical(|ui| {
+                render_node(ui, child, &mut ctx);
+            });
+        }
     }
 }

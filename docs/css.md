@@ -8,3 +8,6 @@
 ## text-color
 - Value: color
 - Sets the Text color of the text in the given tag.
+## display
+- Value: block, inline
+- Sets the display node of the selected tag

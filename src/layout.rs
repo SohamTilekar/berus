@@ -159,6 +159,14 @@ pub struct HtmlNode {
 }
 
 impl HtmlNode {
+    pub fn get_body(&self) -> Option<&Self> {
+        for child in &self.children {
+            if let NodeType::Element(HtmlTag::Body) = child.node_type {
+                return Some(child);
+            }
+        }
+        None
+    }
     // Helper constructor for elements
     pub fn new_element(
         tag: HtmlTag,
