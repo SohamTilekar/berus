@@ -457,7 +457,9 @@ impl<'a> Parser<'a> {
     fn parse_tag_name(&mut self) -> String {
         self.consume_whitespace();
         let start = self.pos;
-        while !self.eof() && self.current_char().is_ascii_alphanumeric() {
+        while !self.eof()
+            && (self.current_char().is_ascii_alphanumeric() || self.current_char() == '_')
+        {
             self.pos += 1;
         }
         self.input[start..self.pos].to_string()

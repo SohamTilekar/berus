@@ -1,5 +1,5 @@
 // browser.rs
-use crate::html_parser;
+use crate::html_parser::{self, print_tree};
 use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
 use eframe::egui;
@@ -421,7 +421,13 @@ fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) 
             // e.g. for <div> or <p> you might reset some context
         }
     }
-
+    for (property_name, properties) in node.style.clone() {
+        if property_name == "text-color" {
+            if let layout::StyleProperty::Color(color) = properties {
+                context.text_color = Some(color.clone());
+            }
+        }
+    }
     // Now handle children, grouping inline runs:
     let mut i = 0;
     while i < node.children.len() {
@@ -491,7 +497,13 @@ fn render_inline(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext
         NodeType::Element(HtmlTag::U) => context.underline = true,
         _ => {}
     }
-
+    for (property_name, properties) in node.style.clone() {
+        if property_name == "text-color" {
+            if let layout::StyleProperty::Color(color) = properties {
+                context.text_color = Some(color.clone());
+            }
+        }
+    }
     // inline elements may have children too:
     for child in &node.children {
         let mut ctx = context.clone();
