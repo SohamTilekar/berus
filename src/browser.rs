@@ -1,6 +1,6 @@
 // browser.rs
 use crate::html_parser;
-use crate::layout::{HtmlNode, HtmlTag, NodeType}; // Import layout definitions
+use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
 use eframe::egui;
 use std::sync::mpsc;
@@ -8,8 +8,6 @@ use std::thread;
 
 // --- Constants for styling and layout ---
 const BASE_SIZE: f32 = 16.0; // Default font size
-const SMALL_DECREMENT: f32 = 3.0; // How much smaller <small> makes text
-const BIG_INCREMENT: f32 = 4.0; // How much larger <big> makes text
 
 // --- NEW: Tab State ---
 #[derive(Clone, Debug)]
@@ -337,8 +335,8 @@ impl eframe::App for BrowserApp {
                         // --- MODIFIED: Render from HtmlNode tree ---
                         ContentState::Loaded { root_node, .. } => {
                             // Start rendering the parsed HTML tree
-                            let initial_context = RenderContext::default();
-                            render_node(ui, root_node, &initial_context);
+                            let mut initial_context = RenderContext::default();
+                            render_node(ui, root_node, &mut initial_context);
                         }
                     }
                     // Ensure the scroll area takes up available space
@@ -364,149 +362,139 @@ impl eframe::App for BrowserApp {
 
 #[derive(Clone, Debug)]
 struct RenderContext {
+    text_color: Option<layout::Color>,
     font_size: f32,
-    is_bold: bool,
-    is_italic: bool,
-    // Add other style attributes as needed (color, text-align, etc.)
+    bold: bool,
+    week: bool,
+    italic: bool,
+    strikethrough: bool,
+    underline: bool,
+    text_style: Option<egui::TextStyle>,
+    font_family: Option<egui::FontFamily>,
 }
 
 impl Default for RenderContext {
     fn default() -> Self {
         RenderContext {
+            text_color: None,
             font_size: BASE_SIZE,
-            is_bold: false,
-            is_italic: false,
+            bold: false,
+            week: false,
+            italic: false,
+            strikethrough: false,
+            underline: false,
+            text_style: None,
+            font_family: None,
         }
     }
 }
 
-/// Recursively renders an HtmlNode and its children
-fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &RenderContext) {
+/// Decide which tags count as “inline” (i.e. should live
+/// in a horizontal buffer).  Here we treat raw text
+/// and formatting tags (B, I, U, S, W, etc.) as inline;
+/// everything else (e.g. DIV, P, custom blocks) is block.
+fn is_inline(node: &HtmlNode) -> bool {
+    match &node.node_type {
+        NodeType::Text(_) => true,
+        NodeType::Element(tag) => matches!(
+            tag,
+            HtmlTag::B | HtmlTag::I | HtmlTag::U | HtmlTag::S | HtmlTag::W | HtmlTag::Br
+        ),
+    }
+}
+
+/// Render a node in “block” (vertical) context, but
+/// automatically group inline runs into horizontal_wrapped.
+fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) {
+    match &node.node_type {
+        // If this node itself is inline, we’ll let the
+        // parent’s grouping logic handle it; so do nothing here.
+        NodeType::Text(_)
+        | NodeType::Element(HtmlTag::B)
+        | NodeType::Element(HtmlTag::I)
+        | NodeType::Element(HtmlTag::U)
+        | NodeType::Element(HtmlTag::S)
+        | NodeType::Element(HtmlTag::W)
+        | NodeType::Element(HtmlTag::Br) => {}
+        // If it’s a block‑level element, you could adjust context here…
+        NodeType::Element(_) => {
+            // e.g. for <div> or <p> you might reset some context
+        }
+    }
+
+    // Now handle children, grouping inline runs:
+    let mut i = 0;
+    while i < node.children.len() {
+        if is_inline(&node.children[i]) {
+            // start of an inline run
+            let start = i;
+            while i < node.children.len() && is_inline(&node.children[i]) {
+                i += 1;
+            }
+            let old_item_spacing = ui.style().spacing.item_spacing;
+            ui.style_mut().spacing.item_spacing.x = 0.0;
+            // render [start .. i) together in one horizontal_wrapped
+            ui.horizontal_wrapped(|ui| {
+                for child in &node.children[start..i] {
+                    // clone context so siblings don’t bleed styles
+                    let mut ctx = context.clone();
+                    render_inline(ui, child, &mut ctx);
+                }
+            });
+            ui.style_mut().spacing.item_spacing = old_item_spacing;
+        } else {
+            // a block child => render it normally (vertical)
+            let mut ctx = context.clone();
+            render_node(ui, &node.children[i], &mut ctx);
+            i += 1;
+        }
+    }
+}
+
+/// Render just one inline node (text or formatting tag)
+/// directly into the current horizontal buffer.
+fn render_inline(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) {
     match &node.node_type {
         NodeType::Text(text) => {
-            let trimmed_text = text.trim_matches(|c: char| c.is_whitespace() && c != '\n'); // Keep internal newlines maybe? Trim ends.
-            if !trimmed_text.is_empty() {
-                let mut rich_text = egui::RichText::new(trimmed_text).size(context.font_size);
-                if context.is_bold {
-                    rich_text = rich_text.strong();
-                }
-                if context.is_italic {
-                    rich_text = rich_text.italics();
-                }
-                // Use label for inline behavior within the current layout
-                ui.label(rich_text);
+            let mut rich = egui::RichText::new(text).size(context.font_size);
+            if context.bold {
+                rich = rich.strong();
             }
+            if context.week {
+                rich = rich.weak();
+            }
+            if context.italic {
+                rich = rich.italics();
+            }
+            if context.underline {
+                rich = rich.underline();
+            }
+            if context.strikethrough {
+                rich = rich.strikethrough();
+            }
+            if let Some(ts) = &context.text_style {
+                rich = rich.text_style(ts.clone());
+            }
+            if let Some(ff) = &context.font_family {
+                rich = rich.family(ff.clone());
+            }
+            if let Some(c) = &context.text_color {
+                rich = rich.color(c.clone().to_ecolor());
+            }
+            ui.label(rich);
         }
-        NodeType::Element(tag) => {
-            // Create a new context potentially modified by this tag
-            let mut child_context = context.clone();
-            let mut block_element = false; // Does this element cause line breaks?
+        NodeType::Element(HtmlTag::Br) => ui.end_row(),
+        NodeType::Element(HtmlTag::B) => context.bold = true,
+        NodeType::Element(HtmlTag::W) => context.week = true,
+        NodeType::Element(HtmlTag::I) => context.italic = true,
+        NodeType::Element(HtmlTag::S) => context.strikethrough = true,
+        NodeType::Element(HtmlTag::U) => context.underline = true,
+        _ => {}
+    }
 
-            // --- Apply Tag-Specific Styling/Layout ---
-            match tag {
-                // --- Block Level Elements ---
-                HtmlTag::H1
-                | HtmlTag::H2
-                | HtmlTag::H3
-                | HtmlTag::H4
-                | HtmlTag::H5
-                | HtmlTag::H6 => {
-                    child_context.font_size = match tag {
-                        HtmlTag::H1 => BASE_SIZE * 2.0,
-                        HtmlTag::H2 => BASE_SIZE * 1.5,
-                        HtmlTag::H3 => BASE_SIZE * 1.17,
-                        HtmlTag::H4 => BASE_SIZE * 1.0,
-                        HtmlTag::H5 => BASE_SIZE * 0.83,
-                        HtmlTag::H6 => BASE_SIZE * 0.67,
-                        _ => context.font_size, // Should not happen
-                    };
-                    child_context.is_bold = true;
-                    block_element = true;
-                }
-                HtmlTag::P => {
-                    block_element = true;
-                }
-                HtmlTag::Div => {
-                    block_element = true;
-                    // Div doesn't add default spacing like P or H*
-                }
-                HtmlTag::Br => {
-                    ui.end_row(); // Force a line break immediately
-                    return; // No children or further processing needed for <br>
-                }
-                HtmlTag::Body | HtmlTag::Html => {
-                    // These are containers, don't add specific style here
-                    // but allow children to render. Body might imply block context.
-                    block_element = true;
-                }
-                HtmlTag::Head | HtmlTag::Title => {
-                    // Don't render children of head or title directly
-                    return;
-                }
-
-                // --- Inline Elements ---
-                HtmlTag::Strong | HtmlTag::B => {
-                    child_context.is_bold = true;
-                }
-                HtmlTag::I => {
-                    // Assuming 'I' is for italic
-                    child_context.is_italic = true;
-                }
-                HtmlTag::Small => {
-                    child_context.font_size = (context.font_size - SMALL_DECREMENT).max(1.0);
-                }
-                HtmlTag::Big => {
-                    child_context.font_size += BIG_INCREMENT;
-                }
-                HtmlTag::Span => {
-                    // Span is neutral, inherits style. Handled by default context passing.
-                }
-                HtmlTag::Hr => {
-                    ui.separator();
-                }
-                HtmlTag::Custom(_) => {
-                    // Handle unknown tags - maybe render as inline? Or block?
-                    // Default to inline for now.
-                    // eprintln!("Rendering unknown tag: <{}>", name);
-                }
-                _ => {}
-            }
-
-            // --- Render Children ---
-            if !node.children.is_empty() {
-                // Use a wrapping horizontal layout for children by default
-                // Block elements will add ui.end_row() after their content.
-                let layout = egui::Layout::left_to_right(egui::Align::TOP).with_main_wrap(true);
-
-                // If it's a block element, render its children vertically or ensure line breaks
-                if block_element {
-                    // Option 1: Use a vertical layout for children of block elements
-                    // ui.vertical(|ui| {
-                    //    for child in &node.children {
-                    //        render_node(ui, child, &child_context);
-                    //    }
-                    // });
-
-                    // Option 2: Use the wrapping layout but add end_row after content
-                    ui.with_layout(layout, |ui| {
-                        for child in &node.children {
-                            render_node(ui, child, &child_context);
-                        }
-                    });
-                    // Add line break *after* the block element's content
-                    ui.end_row();
-                } else {
-                    // Inline elements continue in the current layout flow
-                    // Render children within the parent's layout context
-                    // (The parent might be using the wrapping layout already)
-                    for child in &node.children {
-                        render_node(ui, child, &child_context);
-                    }
-                }
-            } else if block_element {
-                // Handle empty block elements like <p></p> - still add spacing and line break
-                ui.end_row();
-            }
-        }
+    // inline elements may have children too:
+    for child in &node.children {
+        let mut ctx = context.clone();
+        render_inline(ui, child, &mut ctx);
     }
 }

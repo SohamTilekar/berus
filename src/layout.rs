@@ -1,3 +1,4 @@
+use eframe::egui::Color32;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -15,7 +16,10 @@ pub enum HtmlTag {
     Small,
     Big,
     B,  // bold
+    W,  // week
+    U,  // Underline
     I,  // italic
+    S,  // strike through
     Br, // breakline
     Hr, // horizontal ruler
     Body,
@@ -48,6 +52,81 @@ pub enum Color {
     Hsl(u8, u8, u8),
     Hsla(u8, u8, u8, f32),
     Hex(String),
+}
+
+impl Color {
+    pub fn to_ecolor(self) -> Color32 {
+        match self {
+            Color::Rgb(r, g, b) => Color32::from_rgb(r, g, b),
+            Color::Rgba(r, g, b, a) => {
+                let alpha = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
+                Color32::from_rgba_premultiplied(r, g, b, alpha)
+            }
+            Color::Hsl(h, s, l) => {
+                let (r, g, b) = hsl_to_rgb(h, s, l);
+                Color32::from_rgb(r, g, b)
+            }
+            Color::Hsla(h, s, l, a) => {
+                let (r, g, b) = hsl_to_rgb(h, s, l);
+                let alpha = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
+                Color32::from_rgba_premultiplied(r, g, b, alpha)
+            }
+            Color::Hex(s) => {
+                if let Ok(c) = parse_hex_color(&s) {
+                    c
+                } else {
+                    Color32::BLACK
+                }
+            }
+        }
+    }
+}
+
+/// Converts HSL (0–255 each) to RGB (0–255 each).
+fn hsl_to_rgb(h: u8, s: u8, l: u8) -> (u8, u8, u8) {
+    let h = (h as f32) / 255.0 * 360.0;
+    let s = (s as f32) / 255.0;
+    let l = (l as f32) / 255.0;
+
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r1, g1, b1) = match h {
+        h if h < 60.0 => (c, x, 0.0),
+        h if h < 120.0 => (x, c, 0.0),
+        h if h < 180.0 => (0.0, c, x),
+        h if h < 240.0 => (0.0, x, c),
+        h if h < 300.0 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+
+    let r = ((r1 + m) * 255.0).round() as u8;
+    let g = ((g1 + m) * 255.0).round() as u8;
+    let b = ((b1 + m) * 255.0).round() as u8;
+
+    (r, g, b)
+}
+
+/// Parses hex color strings like "#RRGGBB" or "#RRGGBBAA".
+fn parse_hex_color(hex: &str) -> Result<Color32, ()> {
+    let hex = hex.trim_start_matches('#');
+    match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| ())?;
+            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| ())?;
+            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| ())?;
+            Ok(Color32::from_rgb(r, g, b))
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| ())?;
+            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| ())?;
+            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| ())?;
+            let a = u8::from_str_radix(&hex[6..8], 16).map_err(|_| ())?;
+            Ok(Color32::from_rgba_premultiplied(r, g, b, a))
+        }
+        _ => Err(()),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +260,10 @@ impl HtmlNode {
                         HtmlTag::Small => s_lower == "small",
                         HtmlTag::Big => s_lower == "big",
                         HtmlTag::B => s_lower == "b",
+                        HtmlTag::W => s_lower == "w",
                         HtmlTag::I => s_lower == "i",
+                        HtmlTag::U => s_lower == "u",
+                        HtmlTag::S => s_lower == "s",
                         HtmlTag::Br => s_lower == "br",
                         HtmlTag::Hr => s_lower == "hr",
                         HtmlTag::Body => s_lower == "body",
