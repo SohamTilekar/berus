@@ -668,6 +668,7 @@ impl<'a> Parser<'a> {
             "s" => HtmlTag::S,
             "title" => HtmlTag::Title,
             "hr" => HtmlTag::Hr,
+            "a" => HtmlTag::A,
             "script" => HtmlTag::Script,
             "style" => HtmlTag::Style,
             _ => HtmlTag::Custom(tag_name.to_string()),

@@ -2,7 +2,7 @@
 use crate::html_parser::{self};
 use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
-use eframe::egui;
+use eframe::egui::{self, Color32};
 use std::sync::mpsc;
 use std::thread;
 
@@ -319,33 +319,38 @@ impl eframe::App for BrowserApp {
 
         // --- Central Panel: Content Display for Active Tab ---
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(active_tab) = self.tabs.get(self.active_tab_index) {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    match &active_tab.content_state {
-                        ContentState::Idle => {
-                            ui.label("Enter a URL above and click 'Go' or press Enter.");
-                        }
-                        ContentState::Loading(url) => {
-                            ui.label(format!("Loading {}...", url));
-                            ui.spinner();
-                        }
-                        ContentState::Error(err_msg) => {
-                            ui.colored_label(egui::Color32::RED, err_msg);
-                        }
-                        // --- MODIFIED: Render from HtmlNode tree ---
-                        ContentState::Loaded { root_node, .. } => {
-                            // Start rendering the parsed HTML tree
-                            let mut initial_context = RenderContext::default();
-                            if let Some(body) = root_node.get_body() {
-                                render_node(ui, body, &mut initial_context);
-                            }
-                        }
+            // pull out a reference to the tab once…
+            if let Some(tab) = self.tabs.get(self.active_tab_index) {
+                match &tab.content_state {
+                    ContentState::Idle => {
+                        ui.label("Enter a URL above and click 'Go' or press Enter.");
+                        return; // <— drop the borrow of `tab` immediately
                     }
-                    // Ensure the scroll area takes up available space
-                    ui.allocate_space(ui.available_size());
-                });
+                    ContentState::Loading(url) => {
+                        ui.label(format!("Loading {}...", url));
+                        ui.spinner();
+                        return; // <— borrow ends here
+                    }
+                    ContentState::Error(err) => {
+                        ui.colored_label(egui::Color32::RED, err);
+                        return; // <— borrow ends here
+                    }
+                    ContentState::Loaded { root_node, .. } => {
+                        // we still have an immutable borrow on `tab` until the end of this block…
+                        let body = match root_node.get_body() {
+                            Some(b) => b.clone(), // clone it out
+                            None => return,
+                        };
+                        let mut initial_context = RenderContext::default();
+                        // now do the scroll area; we only capture `body` (owned) and `self`
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            render_node(self, ui, &body, &mut initial_context);
+                            ui.allocate_space(ui.available_size());
+                        });
+                    }
+                }
             } else {
-                ui.label("No tabs open."); // Handle case where all tabs might be closed (if closing is added)
+                ui.label("No tabs open.");
             }
         });
 
@@ -373,6 +378,7 @@ struct RenderContext {
     underline: bool,
     text_style: Option<egui::TextStyle>,
     font_family: Option<egui::FontFamily>,
+    href: Option<String>,
 }
 
 impl Default for RenderContext {
@@ -387,6 +393,7 @@ impl Default for RenderContext {
             underline: false,
             text_style: None,
             font_family: None,
+            href: None,
         }
     }
 }
@@ -412,15 +419,24 @@ fn is_inline(node: &HtmlNode) -> bool {
             }
             matches!(
                 tag,
-                HtmlTag::B | HtmlTag::I | HtmlTag::U | HtmlTag::S | HtmlTag::W | HtmlTag::Br
+                HtmlTag::B
+                    | HtmlTag::I
+                    | HtmlTag::U
+                    | HtmlTag::S
+                    | HtmlTag::W
+                    | HtmlTag::A
+                    | HtmlTag::Br
             )
         }
     }
 }
 
-/// Render a node in “block” (vertical) context, but
-/// automatically group inline runs into horizontal_wrapped.
-fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) {
+fn set_node(
+    browser: &mut BrowserApp,
+    ui: &mut egui::Ui,
+    node: &HtmlNode,
+    context: &mut RenderContext,
+) {
     match &node.node_type {
         NodeType::Text(text) => {
             let mut rich = egui::RichText::new(text).size(context.font_size);
@@ -448,14 +464,34 @@ fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) 
             if let Some(c) = &context.text_color {
                 rich = rich.color(c.clone().to_ecolor());
             }
-            ui.label(rich);
+            if let Some(href) = &context.href {
+                let label = egui::Label::new(rich).sense(egui::Sense::click());
+                let mut response = ui.add(label);
+                response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.clicked() {
+                    browser.add_new_tab();
+                    browser.start_loading(browser.active_tab_index, href.clone());
+                }
+            } else {
+                ui.label(text);
+            }
         }
         NodeType::Element(HtmlTag::Br) => ui.end_row(),
+        NodeType::Element(HtmlTag::Hr) => {
+            ui.separator();
+        }
         NodeType::Element(HtmlTag::B) => context.bold = true,
         NodeType::Element(HtmlTag::W) => context.week = true,
         NodeType::Element(HtmlTag::I) => context.italic = true,
         NodeType::Element(HtmlTag::S) => context.strikethrough = true,
         NodeType::Element(HtmlTag::U) => context.underline = true,
+        NodeType::Element(HtmlTag::A) => {
+            if let Some(href) = node.attributes.get("href") {
+                context.text_color = Some(layout::Color::Rgb(127, 127, 255));
+                context.underline = true;
+                context.href = Some(href.clone());
+            }
+        }
         _ => {}
     }
     for (property_name, properties) in node.style.clone() {
@@ -465,90 +501,64 @@ fn render_node(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) 
             }
         }
     }
-    // Now handle children, grouping inline runs:
+}
+
+fn render_node(
+    browser: &mut BrowserApp,
+    ui: &mut egui::Ui,
+    node: &HtmlNode,
+    context: &mut RenderContext,
+) {
+    set_node(browser, ui, node, context);
+
     let mut i = 0;
     while i < node.children.len() {
         if is_inline(&node.children[i]) {
-            // start of an inline run
             let start = i;
-            while i < node.children.len() {
+            while i < node.children.len() && is_inline(&node.children[i]) {
                 i += 1;
             }
             let old_item_spacing = ui.style().spacing.item_spacing;
-            ui.style_mut().spacing.item_spacing.x = 0.0;
-            // render [start .. i) together in one horizontal_wrapped
+            ui.style_mut().spacing.item_spacing.x = 7.;
             ui.horizontal_wrapped(|ui| {
                 for child in &node.children[start..i] {
-                    // clone context so siblings don’t bleed styles
                     let mut ctx = context.clone();
-                    render_inline(ui, child, &mut ctx);
+                    render_inline(browser, ui, child, &mut ctx);
                 }
             });
             ui.style_mut().spacing.item_spacing = old_item_spacing;
         } else {
-            // a block child => render it normally (vertical)
             let mut ctx = context.clone();
-            render_node(ui, &node.children[i], &mut ctx);
+            render_node(browser, ui, &node.children[i], &mut ctx);
             i += 1;
         }
     }
 }
 
-/// Render just one inline node (text or formatting tag)
-/// directly into the current horizontal buffer.
-fn render_inline(ui: &mut egui::Ui, node: &HtmlNode, context: &mut RenderContext) {
-    match &node.node_type {
-        NodeType::Text(text) => {
-            let mut rich = egui::RichText::new(text).size(context.font_size);
-            if context.bold {
-                rich = rich.strong();
-            }
-            if context.week {
-                rich = rich.weak();
-            }
-            if context.italic {
-                rich = rich.italics();
-            }
-            if context.underline {
-                rich = rich.underline();
-            }
-            if context.strikethrough {
-                rich = rich.strikethrough();
-            }
-            if let Some(ts) = &context.text_style {
-                rich = rich.text_style(ts.clone());
-            }
-            if let Some(ff) = &context.font_family {
-                rich = rich.family(ff.clone());
-            }
-            if let Some(c) = &context.text_color {
-                rich = rich.color(c.clone().to_ecolor());
-            }
-            ui.label(rich);
-        }
-        NodeType::Element(HtmlTag::Br) => ui.end_row(),
-        NodeType::Element(HtmlTag::B) => context.bold = true,
-        NodeType::Element(HtmlTag::W) => context.week = true,
-        NodeType::Element(HtmlTag::I) => context.italic = true,
-        NodeType::Element(HtmlTag::S) => context.strikethrough = true,
-        NodeType::Element(HtmlTag::U) => context.underline = true,
-        _ => {}
-    }
-    for (property_name, properties) in node.style.clone() {
-        if property_name == "text-color" {
-            if let layout::StyleProperty::Color(color) = properties {
-                context.text_color = Some(color.clone());
-            }
-        }
-    }
-    // inline elements may have children too:
-    for child in &node.children {
-        let mut ctx = context.clone();
-        if is_inline(child) {
-            render_inline(ui, child, &mut ctx);
+fn render_inline(
+    browser: &mut BrowserApp,
+    ui: &mut egui::Ui,
+    node: &HtmlNode,
+    context: &mut RenderContext,
+) {
+    set_node(browser, ui, node, context);
+
+    let mut i = 0;
+    while i < node.children.len() {
+        if is_inline(&node.children[i]) {
+            let mut ctx = context.clone();
+            render_inline(browser, ui, &node.children[i], &mut ctx);
+            i += 1;
         } else {
+            let start = i;
+            while i < node.children.len() && !is_inline(&node.children[i]) {
+                i += 1;
+            }
             ui.vertical(|ui| {
-                render_node(ui, child, &mut ctx);
+                for child in &node.children[start..i] {
+                    let mut ctx = context.clone();
+                    render_node(browser, ui, child, &mut ctx);
+                }
             });
         }
     }

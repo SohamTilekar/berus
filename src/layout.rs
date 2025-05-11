@@ -22,6 +22,7 @@ pub enum HtmlTag {
     S,  // strike through
     Br, // breakline
     Hr, // horizontal ruler
+    A,  // Anchor tag
     Body,
     Head,
     Title,
@@ -274,6 +275,7 @@ impl HtmlNode {
                         HtmlTag::S => s_lower == "s",
                         HtmlTag::Br => s_lower == "br",
                         HtmlTag::Hr => s_lower == "hr",
+                        HtmlTag::A => s_lower == "a",
                         HtmlTag::Body => s_lower == "body",
                         HtmlTag::Head => s_lower == "head",
                         HtmlTag::Title => s_lower == "title",
