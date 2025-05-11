@@ -2,7 +2,7 @@
 use crate::html_parser::{self};
 use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
-use eframe::egui::{self, Color32};
+use eframe::egui;
 use std::sync::mpsc;
 use std::thread;
 
@@ -258,6 +258,8 @@ impl eframe::App for BrowserApp {
         // --- Top Panel: Tab Bar and URL Bar ---
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // Tab Bar
+            let mut tab_to_close_index: Option<usize> = None; // Keep track of which tab to close
+
             ui.horizontal(|ui| {
                 for (index, tab) in self.tabs.iter().enumerate() {
                     // Use a shorter, potentially truncated title for the tab button itself
@@ -268,14 +270,45 @@ impl eframe::App for BrowserApp {
                         tab_display_title.to_string()
                     };
 
-                    if ui
-                        .selectable_label(self.active_tab_index == index, truncated_title)
-                        .clicked()
-                    {
-                        self.active_tab_index = index;
-                    }
-                    // TODO: Add close button per tab
+                    // Use a nested horizontal layout for the tab title and close button
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .selectable_label(self.active_tab_index == index, truncated_title)
+                                .clicked()
+                            {
+                                self.active_tab_index = index;
+                            }
+
+                            // Add close button
+                            if ui.small_button("x").clicked() {
+                                // Mark this tab for closing after the loop
+                                tab_to_close_index = Some(index);
+                            }
+                        }); // End of nested horizontal layout for tab
+                    });
                 }
+
+                // Handle tab closing outside the iteration
+                if let Some(index_to_close) = tab_to_close_index {
+                    self.tabs.remove(index_to_close);
+
+                    // Adjust active_tab_index if the closed tab was active
+                    if self.active_tab_index == index_to_close {
+                        // If the last tab was closed, select the new last tab (or index 0 if no tabs left)
+                        if !self.tabs.is_empty() {
+                            self.active_tab_index = self.tabs.len() - 1;
+                        } else {
+                            // If no tabs are left, index 0 is fine (UI handles empty state)
+                            self.active_tab_index = 0;
+                        }
+                    } else if self.active_tab_index > index_to_close {
+                        // If a tab before the active one was closed, decrement the active index
+                        self.active_tab_index -= 1;
+                    }
+                }
+
+                // Add New Tab button
                 if ui.button("+").clicked() {
                     self.add_new_tab();
                 }
