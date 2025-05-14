@@ -13,16 +13,19 @@ pub enum HtmlTag {
     H5,
     H6,
     Strong,
+    Em,
     Small,
     Big,
-    B,  // bold
-    W,  // week
-    U,  // Underline
-    I,  // italic
-    S,  // strike through
-    Br, // breakline
-    Hr, // horizontal ruler
-    A,  // Anchor tag
+    B,    // bold
+    W,    // week
+    U,    // Underline
+    I,    // italic
+    S,    // strike through
+    Br,   // breakline
+    Hr,   // horizontal ruler
+    A,    // Anchor tag
+    Abbr, // Abbreviation tag
+    Img,
     Body,
     Head,
     Title,
@@ -44,6 +47,19 @@ pub enum Length {
     Em(f32),
     Rem(f32),
     Percent(f32),
+}
+
+impl Length {
+    /// Converts the length to an egui value (f32).
+    /// Requires `base_font_size` for Em/Rem and `parent_size` for Percent.
+    pub fn to_egui_value(&self, base_font_size: f32, parent_size: f32) -> f32 {
+        match self {
+            Length::Px(px) => *px,
+            Length::Em(em) => em * base_font_size,
+            Length::Rem(rem) => rem * base_font_size,
+            Length::Percent(percent) => percent / 100.0 * parent_size,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -72,13 +88,7 @@ impl Color {
                 let alpha = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
                 Color32::from_rgba_premultiplied(r, g, b, alpha)
             }
-            Color::Hex(s) => {
-                if let Ok(c) = parse_hex_color(&s) {
-                    c
-                } else {
-                    Color32::BLACK
-                }
-            }
+            Color::Hex(s) => parse_hex_color(&s),
         }
     }
 }
@@ -109,25 +119,71 @@ fn hsl_to_rgb(h: u8, s: u8, l: u8) -> (u8, u8, u8) {
     (r, g, b)
 }
 
-/// Parses hex color strings like "#RRGGBB" or "#RRGGBBAA".
-fn parse_hex_color(hex: &str) -> Result<Color32, ()> {
+fn parse_hex_color(hex: &str) -> Color32 {
     let hex = hex.trim_start_matches('#');
-    match hex.len() {
-        6 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| ())?;
-            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| ())?;
-            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| ())?;
-            Ok(Color32::from_rgb(r, g, b))
-        }
-        8 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| ())?;
-            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| ())?;
-            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| ())?;
-            let a = u8::from_str_radix(&hex[6..8], 16).map_err(|_| ())?;
-            Ok(Color32::from_rgba_premultiplied(r, g, b, a))
-        }
-        _ => Err(()),
+    let hex = hex.trim(); // Remove whitespace just in case
+
+    // Helper to parse a component or default to 255
+    fn parse_component(s: &str) -> u8 {
+        u8::from_str_radix(s, 16).unwrap_or(255)
     }
+
+    let (r, g, b, a) = match hex.len() {
+        1 => {
+            let c = hex.repeat(2);
+            let v = parse_component(&c);
+            (v, v, v, 255)
+        }
+        2 => {
+            let v = parse_component(&hex);
+            (v, v, v, 255)
+        }
+        3 => (
+            parse_component(&hex[0..1].repeat(2)),
+            parse_component(&hex[1..2].repeat(2)),
+            parse_component(&hex[2..3].repeat(2)),
+            255,
+        ),
+        4 => (
+            parse_component(&hex[0..1].repeat(2)),
+            parse_component(&hex[1..2].repeat(2)),
+            parse_component(&hex[2..3].repeat(2)),
+            parse_component(&hex[3..4].repeat(2)),
+        ),
+        6 => (
+            parse_component(&hex[0..2]),
+            parse_component(&hex[2..4]),
+            parse_component(&hex[4..6]),
+            255,
+        ),
+        8 => (
+            parse_component(&hex[0..2]),
+            parse_component(&hex[2..4]),
+            parse_component(&hex[4..6]),
+            parse_component(&hex[6..8]),
+        ),
+        _ => {
+            // Try to use as much as possible
+            let mut digits = hex
+                .chars()
+                .filter(|c| c.is_ascii_hexdigit())
+                .collect::<Vec<_>>();
+
+            while digits.len() < 8 {
+                digits.push('F');
+            }
+
+            let hex = digits.into_iter().collect::<String>();
+            (
+                parse_component(&hex[0..2]),
+                parse_component(&hex[2..4]),
+                parse_component(&hex[4..6]),
+                parse_component(&hex[6..8]),
+            )
+        }
+    };
+
+    Color32::from_rgba_premultiplied(r, g, b, a)
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +332,9 @@ impl HtmlNode {
                         HtmlTag::Br => s_lower == "br",
                         HtmlTag::Hr => s_lower == "hr",
                         HtmlTag::A => s_lower == "a",
+                        HtmlTag::Em => s_lower == "em",
+                        HtmlTag::Abbr => s_lower == "abbr",
+                        HtmlTag::Img => s_lower == "img",
                         HtmlTag::Body => s_lower == "body",
                         HtmlTag::Head => s_lower == "head",
                         HtmlTag::Title => s_lower == "title",

@@ -78,7 +78,7 @@ pub fn print_tree(node: &HtmlNode) {
 fn is_void_element(tag: &HtmlTag) -> bool {
     match tag {
         // Check specific enum variants first for performance
-        HtmlTag::Br | HtmlTag::Hr => true,
+        HtmlTag::Br | HtmlTag::Hr | HtmlTag::Img => true,
         _ => false,
     }
 }
@@ -655,9 +655,11 @@ impl<'a> Parser<'a> {
             "h5" => HtmlTag::H5,
             "h6" => HtmlTag::H6,
             "strong" => HtmlTag::Strong,
+            "em" => HtmlTag::Em,
             "small" => HtmlTag::Small,
             "big" => HtmlTag::Big,
             "br" => HtmlTag::Br,
+            "img" => HtmlTag::Img,
             "body" => HtmlTag::Body,
             "head" => HtmlTag::Head,
             "html" => HtmlTag::Html,
@@ -669,6 +671,7 @@ impl<'a> Parser<'a> {
             "title" => HtmlTag::Title,
             "hr" => HtmlTag::Hr,
             "a" => HtmlTag::A,
+            "abbr" => HtmlTag::Abbr,
             "script" => HtmlTag::Script,
             "style" => HtmlTag::Style,
             _ => HtmlTag::Custom(tag_name.to_string()),

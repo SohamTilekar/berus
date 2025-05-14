@@ -215,6 +215,7 @@ impl BrowserApp {
 
 impl eframe::App for BrowserApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_debug_on_hover(true);
         // --- Receive Network Results ---
         match self.network_receiver.try_recv() {
             Ok(Ok((tab_id, loaded_url, _, root_node))) => {
@@ -412,6 +413,7 @@ struct RenderContext {
     text_style: Option<egui::TextStyle>,
     font_family: Option<egui::FontFamily>,
     href: Option<String>,
+    abbr: Option<String>,
 }
 
 impl Default for RenderContext {
@@ -427,6 +429,7 @@ impl Default for RenderContext {
             text_style: None,
             font_family: None,
             href: None,
+            abbr: None,
         }
     }
 }
@@ -459,6 +462,13 @@ fn is_inline(node: &HtmlNode) -> bool {
                     | HtmlTag::W
                     | HtmlTag::A
                     | HtmlTag::Br
+                    | HtmlTag::Span
+                    | HtmlTag::Strong
+                    | HtmlTag::Em
+                    | HtmlTag::Abbr
+                    | HtmlTag::Small
+                    | HtmlTag::Big
+                    | HtmlTag::Img
             )
         }
     }
@@ -469,7 +479,7 @@ fn set_node(
     ui: &mut egui::Ui,
     node: &HtmlNode,
     context: &mut RenderContext,
-) {
+) -> egui::Frame {
     match &node.node_type {
         NodeType::Text(text) => {
             let mut rich = egui::RichText::new(text).size(context.font_size);
@@ -497,25 +507,35 @@ fn set_node(
             if let Some(c) = &context.text_color {
                 rich = rich.color(c.clone().to_ecolor());
             }
+            let mut label = egui::Label::new(rich);
+            if let Some(_) = &context.href {
+                label = label.sense(egui::Sense::click());
+            }
+            let mut response = ui.add(label);
             if let Some(href) = &context.href {
-                let label = egui::Label::new(rich).sense(egui::Sense::click());
-                let mut response = ui.add(label);
                 response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
                 if response.clicked() {
                     browser.add_new_tab();
                     browser.start_loading(browser.active_tab_index, href.clone());
                 }
-            } else {
-                ui.label(text);
+            }
+            if let Some(title) = &context.abbr {
+                response.on_hover_text(title);
             }
         }
         NodeType::Element(HtmlTag::Br) => ui.end_row(),
         NodeType::Element(HtmlTag::Hr) => {
             ui.separator();
         }
-        NodeType::Element(HtmlTag::B) => context.bold = true,
+        NodeType::Element(HtmlTag::Big) => {
+            context.font_size *= 1.2;
+        }
+        NodeType::Element(HtmlTag::Small) => {
+            context.font_size *= 0.8;
+        }
         NodeType::Element(HtmlTag::W) => context.week = true,
-        NodeType::Element(HtmlTag::I) => context.italic = true,
+        NodeType::Element(HtmlTag::Strong | HtmlTag::B) => context.bold = true,
+        NodeType::Element(HtmlTag::Em | HtmlTag::I) => context.italic = true,
         NodeType::Element(HtmlTag::S) => context.strikethrough = true,
         NodeType::Element(HtmlTag::U) => context.underline = true,
         NodeType::Element(HtmlTag::A) => {
@@ -525,15 +545,236 @@ fn set_node(
                 context.href = Some(href.clone());
             }
         }
-        _ => {}
-    }
-    for (property_name, properties) in node.style.clone() {
-        if property_name == "text-color" {
-            if let layout::StyleProperty::Color(color) = properties {
-                context.text_color = Some(color.clone());
+        NodeType::Element(HtmlTag::Abbr) => {
+            if let Some(title) = node.attributes.get("title") {
+                context.abbr = Some(title.clone());
+            }
+        }
+        NodeType::Element(HtmlTag::Img) => {
+            if let Some(src) = node.attributes.get("str") {
+                ui.image(egui::ImageSource::Uri(std::borrow::Cow::Borrowed(
+                    src.as_str(),
+                )));
+            }
+        }
+        NodeType::Element(tag) => {
+            let scale = match tag {
+                HtmlTag::H1 => Some(2.0),
+                HtmlTag::H2 => Some(1.8),
+                HtmlTag::H3 => Some(1.6),
+                HtmlTag::H4 => Some(1.4),
+                HtmlTag::H5 => Some(1.2),
+                HtmlTag::H6 => Some(1.1),
+                _ => None,
+            };
+
+            if let Some(scale) = scale {
+                context.text_style = Some(egui::TextStyle::Heading);
+                context.font_size *= scale;
             }
         }
     }
+    // Initialize mutable frame properties
+    let mut inner_margin = egui::Margin::default();
+    let mut outer_margin = egui::Margin::default();
+    let mut stroke = egui::Stroke::NONE;
+    let mut rounding = egui::Rounding::ZERO;
+    let mut fill = egui::Color32::TRANSPARENT;
+
+    // Process styles before matching node type
+    for (property_name, properties) in node.style.clone() {
+        match property_name.as_str() {
+            "text-color" | "color" => {
+                if let layout::StyleProperty::Color(color) = properties {
+                    context.text_color = Some(color.clone());
+                }
+            }
+            "padding" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let value = len.to_egui_value(context.font_size, ui.available_size().x);
+                    inner_margin = egui::Margin::same(value);
+                }
+            }
+            "padding-top" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    inner_margin.top = len.to_egui_value(context.font_size, ui.available_size().y);
+                }
+            }
+            "padding-bottom" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    inner_margin.bottom =
+                        len.to_egui_value(context.font_size, ui.available_size().y);
+                }
+            }
+            "padding-left" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    inner_margin.left = len.to_egui_value(context.font_size, ui.available_size().x);
+                }
+            }
+            "padding-right" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    inner_margin.right =
+                        len.to_egui_value(context.font_size, ui.available_size().x);
+                }
+            }
+            "margin" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let value = len.to_egui_value(context.font_size, ui.available_size().x);
+                    outer_margin = egui::Margin::same(value);
+                }
+            }
+            "margin-top" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    outer_margin.top = len.to_egui_value(context.font_size, ui.available_size().y);
+                }
+            }
+            "margin-bottom" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    outer_margin.bottom =
+                        len.to_egui_value(context.font_size, ui.available_size().y);
+                }
+            }
+            "margin-left" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    outer_margin.left = len.to_egui_value(context.font_size, ui.available_size().x);
+                }
+            }
+            "margin-right" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    outer_margin.right =
+                        len.to_egui_value(context.font_size, ui.available_size().x);
+                }
+            }
+            "border-width" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    stroke.width = len.to_egui_value(context.font_size, ui.available_size().x);
+                }
+            }
+            "border-top-width" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    stroke.width = stroke
+                        .width
+                        .max(len.to_egui_value(context.font_size, ui.available_size().y));
+                }
+            }
+            "border-bottom-width" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    stroke.width = stroke
+                        .width
+                        .max(len.to_egui_value(context.font_size, ui.available_size().y));
+                }
+            }
+            "border-left-width" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    stroke.width = stroke
+                        .width
+                        .max(len.to_egui_value(context.font_size, ui.available_size().x));
+                }
+            }
+            "border-right-width" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    stroke.width = stroke
+                        .width
+                        .max(len.to_egui_value(context.font_size, ui.available_size().x));
+                }
+            }
+            "border-color" => {
+                if let layout::StyleProperty::Color(color) = properties {
+                    stroke.color = color.to_ecolor();
+                }
+            }
+            "border-radius" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let radius = len.to_egui_value(context.font_size, ui.available_size().x);
+                    rounding = egui::Rounding::same(radius);
+                }
+            }
+            "border-radius-ne" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let radius = len.to_egui_value(context.font_size, ui.available_size().x);
+                    rounding.ne = radius;
+                }
+            }
+            "border-radius-nw" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let radius = len.to_egui_value(context.font_size, ui.available_size().x);
+                    rounding.nw = radius;
+                }
+            }
+            "border-radius-se" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let radius = len.to_egui_value(context.font_size, ui.available_size().x);
+                    rounding.se = radius;
+                }
+            }
+            "border-radius-sw" => {
+                if let layout::StyleProperty::Length(len) = properties {
+                    let radius = len.to_egui_value(context.font_size, ui.available_size().x);
+                    rounding.sw = radius;
+                }
+            }
+            "background-color" => {
+                if let layout::StyleProperty::Color(color) = properties {
+                    fill = color.to_ecolor();
+                }
+            }
+            "text-decoration" => {
+                if let layout::StyleProperty::Keyword(keyword) = properties {
+                    if keyword == "underline" {
+                        context.underline = true;
+                    } else if keyword == "nounderline" {
+                        context.underline = false;
+                    } else if keyword == "strikethrough" {
+                        context.strikethrough = true;
+                    } else if keyword == "nostrikethrough" {
+                        context.strikethrough = false;
+                    }
+                }
+            }
+            "font-weight" => {
+                if let layout::StyleProperty::Keyword(keyword) = properties {
+                    if keyword == "bold" {
+                        context.bold = true;
+                    } else if keyword == "bolder" {
+                        context.font_size *= 1.2;
+                    } else if keyword == "lighter" {
+                        context.font_size *= 0.8;
+                    }
+                }
+            }
+            "font-style" => {
+                if let layout::StyleProperty::Keyword(keyword) = properties {
+                    if keyword == "normal" {
+                        context.bold = false;
+                        context.italic = false;
+                        context.underline = false;
+                        context.strikethrough = false;
+                    } else if keyword == "italic" {
+                        context.italic = true;
+                    } else if keyword == "bold" {
+                        context.bold = true;
+                    } else if keyword == "underline" {
+                        context.underline = true;
+                    } else if keyword == "strikethrough" {
+                        context.strikethrough = true;
+                    }
+                }
+            }
+            _ => {
+                // Unhandled property
+            }
+        }
+    }
+
+    // Re-create the frame with calculated properties
+    let frame = egui::Frame::default()
+        .inner_margin(inner_margin)
+        .outer_margin(outer_margin)
+        .stroke(stroke)
+        .rounding(rounding)
+        .fill(fill);
+
+    frame
 }
 
 fn render_node(
@@ -542,28 +783,57 @@ fn render_node(
     node: &HtmlNode,
     context: &mut RenderContext,
 ) {
-    set_node(browser, ui, node, context);
+    let frame = set_node(browser, ui, node, context);
 
-    let mut i = 0;
-    while i < node.children.len() {
-        if is_inline(&node.children[i]) {
-            let start = i;
-            while i < node.children.len() && is_inline(&node.children[i]) {
-                i += 1;
-            }
-            let old_item_spacing = ui.style().spacing.item_spacing;
-            ui.style_mut().spacing.item_spacing.x = 7.;
-            ui.horizontal_wrapped(|ui| {
-                for child in &node.children[start..i] {
-                    let mut ctx = context.clone();
-                    render_inline(browser, ui, child, &mut ctx);
+    if frame != egui::Frame::default() {
+        frame.show(ui, |ui| {
+            ui.vertical(|ui| {
+                let mut i = 0;
+                while i < node.children.len() {
+                    if is_inline(&node.children[i]) {
+                        let start = i;
+                        while i < node.children.len() && is_inline(&node.children[i]) {
+                            i += 1;
+                        }
+                        let old_item_spacing = ui.style().spacing.item_spacing;
+                        ui.style_mut().spacing.item_spacing.x = 7.;
+                        ui.horizontal_wrapped(|ui| {
+                            for child in &node.children[start..i] {
+                                let mut ctx = context.clone();
+                                render_inline(browser, ui, child, &mut ctx);
+                            }
+                        });
+                        ui.style_mut().spacing.item_spacing = old_item_spacing;
+                    } else {
+                        let mut ctx = context.clone();
+                        render_node(browser, ui, &node.children[i], &mut ctx);
+                        i += 1;
+                    }
                 }
             });
-            ui.style_mut().spacing.item_spacing = old_item_spacing;
-        } else {
-            let mut ctx = context.clone();
-            render_node(browser, ui, &node.children[i], &mut ctx);
-            i += 1;
+        });
+    } else {
+        let mut i = 0;
+        while i < node.children.len() {
+            if is_inline(&node.children[i]) {
+                let start = i;
+                while i < node.children.len() && is_inline(&node.children[i]) {
+                    i += 1;
+                }
+                let old_item_spacing = ui.style().spacing.item_spacing;
+                ui.style_mut().spacing.item_spacing.x = 7.;
+                ui.horizontal_wrapped(|ui| {
+                    for child in &node.children[start..i] {
+                        let mut ctx = context.clone();
+                        render_inline(browser, ui, child, &mut ctx);
+                    }
+                });
+                ui.style_mut().spacing.item_spacing = old_item_spacing;
+            } else {
+                let mut ctx = context.clone();
+                render_node(browser, ui, &node.children[i], &mut ctx);
+                i += 1;
+            }
         }
     }
 }
@@ -574,25 +844,51 @@ fn render_inline(
     node: &HtmlNode,
     context: &mut RenderContext,
 ) {
-    set_node(browser, ui, node, context);
+    let frame = set_node(browser, ui, node, context);
 
-    let mut i = 0;
-    while i < node.children.len() {
-        if is_inline(&node.children[i]) {
-            let mut ctx = context.clone();
-            render_inline(browser, ui, &node.children[i], &mut ctx);
-            i += 1;
-        } else {
-            let start = i;
-            while i < node.children.len() && !is_inline(&node.children[i]) {
-                i += 1;
-            }
-            ui.vertical(|ui| {
-                for child in &node.children[start..i] {
-                    let mut ctx = context.clone();
-                    render_node(browser, ui, child, &mut ctx);
+    if frame != egui::Frame::default() {
+        frame.show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let mut i = 0;
+                while i < node.children.len() {
+                    if is_inline(&node.children[i]) {
+                        let mut ctx = context.clone();
+                        render_inline(browser, ui, &node.children[i], &mut ctx);
+                        i += 1;
+                    } else {
+                        let start = i;
+                        while i < node.children.len() && !is_inline(&node.children[i]) {
+                            i += 1;
+                        }
+                        ui.vertical(|ui| {
+                            for child in &node.children[start..i] {
+                                let mut ctx = context.clone();
+                                render_node(browser, ui, child, &mut ctx);
+                            }
+                        });
+                    }
                 }
             });
+        });
+    } else {
+        let mut i = 0;
+        while i < node.children.len() {
+            if is_inline(&node.children[i]) {
+                let mut ctx = context.clone();
+                render_inline(browser, ui, &node.children[i], &mut ctx);
+                i += 1;
+            } else {
+                let start = i;
+                while i < node.children.len() && !is_inline(&node.children[i]) {
+                    i += 1;
+                }
+                ui.vertical(|ui| {
+                    for child in &node.children[start..i] {
+                        let mut ctx = context.clone();
+                        render_node(browser, ui, child, &mut ctx);
+                    }
+                });
+            }
         }
     }
 }

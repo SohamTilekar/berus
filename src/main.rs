@@ -23,7 +23,7 @@ fn main() -> Result<(), eframe::Error> {
 
     // Run the eframe application
     eframe::run_native(
-        "Basic Browser", // App name used by OS
+        "BerusBrowser", // App name used by OS
         options,
         Box::new(move |cc| {
             // Create the BrowserApp instance, passing the initial URL
