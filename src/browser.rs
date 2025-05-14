@@ -650,34 +650,6 @@ fn set_node(
                     stroke.width = len.to_egui_value(context.font_size, ui.available_size().x);
                 }
             }
-            "border-top-width" => {
-                if let layout::StyleProperty::Length(len) = properties {
-                    stroke.width = stroke
-                        .width
-                        .max(len.to_egui_value(context.font_size, ui.available_size().y));
-                }
-            }
-            "border-bottom-width" => {
-                if let layout::StyleProperty::Length(len) = properties {
-                    stroke.width = stroke
-                        .width
-                        .max(len.to_egui_value(context.font_size, ui.available_size().y));
-                }
-            }
-            "border-left-width" => {
-                if let layout::StyleProperty::Length(len) = properties {
-                    stroke.width = stroke
-                        .width
-                        .max(len.to_egui_value(context.font_size, ui.available_size().x));
-                }
-            }
-            "border-right-width" => {
-                if let layout::StyleProperty::Length(len) = properties {
-                    stroke.width = stroke
-                        .width
-                        .max(len.to_egui_value(context.font_size, ui.available_size().x));
-                }
-            }
             "border-color" => {
                 if let layout::StyleProperty::Color(color) = properties {
                     stroke.color = color.to_ecolor();

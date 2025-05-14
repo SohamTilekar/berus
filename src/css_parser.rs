@@ -118,10 +118,11 @@ impl LengthParser {
         let s = s.trim();
         if let Some(v) = s.strip_suffix("px") {
             v.parse().ok().map(Length::Px)
+        } else if let Some(v) = s.strip_suffix("rem") {
+            // Put rem before em cz em will still come after r
+            v.parse().ok().map(Length::Rem)
         } else if let Some(v) = s.strip_suffix("em") {
             v.parse().ok().map(Length::Em)
-        } else if let Some(v) = s.strip_suffix("rem") {
-            v.parse().ok().map(Length::Rem)
         } else if let Some(v) = s.strip_suffix('%') {
             v.parse().ok().map(Length::Percent)
         } else {
