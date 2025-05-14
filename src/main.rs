@@ -27,7 +27,8 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(move |cc| {
             // Create the BrowserApp instance, passing the initial URL
-            Box::new(BrowserApp::new(cc, initial_url))
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            Ok(Box::new(BrowserApp::new(cc, initial_url)))
         }),
     )
 }

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.27.2"
-url = "2.4"               # For URL parsing
-native-tls = "0.2"        # For HTTPS/TLS
+eframe = "0.31.1"
+egui_extras = { version = "0.31.1", features = ["all_loaders"] }
+image = { version = "0.25.6", features = ["jpeg", "png"] }
+url = "2.4"                                                      # For URL parsing
+native-tls = "0.2"                                               # For HTTPS/TLS

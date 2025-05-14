@@ -142,7 +142,6 @@ impl BrowserApp {
             network_receiver: receiver,
             network_sender: sender,
         };
-
         // Trigger initial load if URL was provided
         if !app.tabs[0].url_input.is_empty() {
             app.start_loading(0, app.tabs[0].url_input.clone());
@@ -551,7 +550,7 @@ fn set_node(
             }
         }
         NodeType::Element(HtmlTag::Img) => {
-            if let Some(src) = node.attributes.get("str") {
+            if let Some(src) = node.attributes.get("src") {
                 ui.image(egui::ImageSource::Uri(std::borrow::Cow::Borrowed(
                     src.as_str(),
                 )));
@@ -578,7 +577,7 @@ fn set_node(
     let mut inner_margin = egui::Margin::default();
     let mut outer_margin = egui::Margin::default();
     let mut stroke = egui::Stroke::NONE;
-    let mut rounding = egui::Rounding::ZERO;
+    let mut rounding = egui::CornerRadius::ZERO;
     let mut fill = egui::Color32::TRANSPARENT;
 
     // Process styles before matching node type
@@ -592,57 +591,61 @@ fn set_node(
             "padding" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let value = len.to_egui_value(context.font_size, ui.available_size().x);
-                    inner_margin = egui::Margin::same(value);
+                    inner_margin = egui::Margin::same(value as i8);
                 }
             }
             "padding-top" => {
                 if let layout::StyleProperty::Length(len) = properties {
-                    inner_margin.top = len.to_egui_value(context.font_size, ui.available_size().y);
+                    inner_margin.top =
+                        len.to_egui_value(context.font_size, ui.available_size().y) as i8;
                 }
             }
             "padding-bottom" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     inner_margin.bottom =
-                        len.to_egui_value(context.font_size, ui.available_size().y);
+                        len.to_egui_value(context.font_size, ui.available_size().y) as i8;
                 }
             }
             "padding-left" => {
                 if let layout::StyleProperty::Length(len) = properties {
-                    inner_margin.left = len.to_egui_value(context.font_size, ui.available_size().x);
+                    inner_margin.left =
+                        len.to_egui_value(context.font_size, ui.available_size().x) as i8;
                 }
             }
             "padding-right" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     inner_margin.right =
-                        len.to_egui_value(context.font_size, ui.available_size().x);
+                        len.to_egui_value(context.font_size, ui.available_size().x) as i8;
                 }
             }
             "margin" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let value = len.to_egui_value(context.font_size, ui.available_size().x);
-                    outer_margin = egui::Margin::same(value);
+                    outer_margin = egui::Margin::same(value as i8);
                 }
             }
             "margin-top" => {
                 if let layout::StyleProperty::Length(len) = properties {
-                    outer_margin.top = len.to_egui_value(context.font_size, ui.available_size().y);
+                    outer_margin.top =
+                        len.to_egui_value(context.font_size, ui.available_size().y) as i8;
                 }
             }
             "margin-bottom" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     outer_margin.bottom =
-                        len.to_egui_value(context.font_size, ui.available_size().y);
+                        len.to_egui_value(context.font_size, ui.available_size().y) as i8;
                 }
             }
             "margin-left" => {
                 if let layout::StyleProperty::Length(len) = properties {
-                    outer_margin.left = len.to_egui_value(context.font_size, ui.available_size().x);
+                    outer_margin.left =
+                        len.to_egui_value(context.font_size, ui.available_size().x) as i8;
                 }
             }
             "margin-right" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     outer_margin.right =
-                        len.to_egui_value(context.font_size, ui.available_size().x);
+                        len.to_egui_value(context.font_size, ui.available_size().x) as i8;
                 }
             }
             "border-width" => {
@@ -658,31 +661,31 @@ fn set_node(
             "border-radius" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let radius = len.to_egui_value(context.font_size, ui.available_size().x);
-                    rounding = egui::Rounding::same(radius);
+                    rounding = egui::CornerRadius::same(radius as u8);
                 }
             }
             "border-radius-ne" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let radius = len.to_egui_value(context.font_size, ui.available_size().x);
-                    rounding.ne = radius;
+                    rounding.ne = radius as u8;
                 }
             }
             "border-radius-nw" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let radius = len.to_egui_value(context.font_size, ui.available_size().x);
-                    rounding.nw = radius;
+                    rounding.nw = radius as u8;
                 }
             }
             "border-radius-se" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let radius = len.to_egui_value(context.font_size, ui.available_size().x);
-                    rounding.se = radius;
+                    rounding.se = radius as u8;
                 }
             }
             "border-radius-sw" => {
                 if let layout::StyleProperty::Length(len) = properties {
                     let radius = len.to_egui_value(context.font_size, ui.available_size().x);
-                    rounding.sw = radius;
+                    rounding.sw = radius as u8;
                 }
             }
             "background-color" => {
@@ -743,7 +746,7 @@ fn set_node(
         .inner_margin(inner_margin)
         .outer_margin(outer_margin)
         .stroke(stroke)
-        .rounding(rounding)
+        .corner_radius(rounding)
         .fill(fill);
 
     frame
