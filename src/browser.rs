@@ -214,7 +214,7 @@ impl BrowserApp {
 
 impl eframe::App for BrowserApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.set_debug_on_hover(true);
+        // ctx.set_debug_on_hover(true);
         // --- Receive Network Results ---
         match self.network_receiver.try_recv() {
             Ok(Ok((tab_id, loaded_url, _, root_node))) => {
@@ -551,9 +551,65 @@ fn set_node(
         }
         NodeType::Element(HtmlTag::Img) => {
             if let Some(src) = node.attributes.get("src") {
-                ui.image(egui::ImageSource::Uri(std::borrow::Cow::Borrowed(
-                    src.as_str(),
-                )));
+                // Get the image from the network
+                let mut image =
+                    egui::Image::new(egui::ImageSource::Uri(std::borrow::Cow::Owned(src.clone())));
+
+                // Try parsing width and height from attributes
+                let width = node
+                    .attributes
+                    .get("width")
+                    .and_then(|w| w.parse::<f32>().ok());
+                let height = node
+                    .attributes
+                    .get("height")
+                    .and_then(|h| h.parse::<f32>().ok());
+
+                // Get the original size to compute aspect ratio if needed
+                if let Some(original_size) = image.size() {
+                    image = image.fit_to_exact_size(match (width, height) {
+                        (Some(w), Some(h)) => egui::Vec2::new(w, h),
+                        (Some(w), None) => {
+                            let h = w * original_size.y / original_size.x;
+                            egui::Vec2::new(w, h)
+                        }
+                        (None, Some(h)) => {
+                            let w = h * original_size.x / original_size.y;
+                            egui::Vec2::new(w, h)
+                        }
+                        (None, None) => original_size,
+                    });
+                } else {
+                    image = image.fit_to_original_size(1.);
+                }
+
+                // Apply hover sense if there’s an alt or href attribute
+                let has_title =
+                    node.attributes.contains_key("alt") || node.attributes.contains_key("title");
+                let is_clickable = context.href.is_some();
+
+                if is_clickable {
+                    image = image.sense(egui::Sense::click()); // ::click() senses both click & hover
+                } else if has_title {
+                    image = image.sense(egui::Sense::hover());
+                }
+
+                let mut response = ui.add(image);
+
+                if let Some(title) = node.attributes.get("title") {
+                    response = response.on_hover_text(egui::RichText::new(title));
+                } else if let Some(alt) = node.attributes.get("alt") {
+                    response = response.on_hover_text(egui::RichText::new(alt));
+                }
+
+                // Handle clicking the image like an anchor
+                if let Some(href) = &context.href {
+                    response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if response.clicked() {
+                        browser.add_new_tab();
+                        browser.start_loading(browser.active_tab_index, href.clone());
+                    }
+                }
             }
         }
         NodeType::Element(tag) => {
