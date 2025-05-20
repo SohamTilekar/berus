@@ -1,4 +1,3 @@
 dump*
 Cargo.lock
 target/*
-.cargo/*

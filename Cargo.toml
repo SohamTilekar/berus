@@ -10,6 +10,6 @@ url = "2.4"                                                      # For URL parsi
 native-tls = "0.2"                                               # For HTTPS/TLS
 
 [profile.dev]
-opt-level = 1
+opt-level = 0
 [profile.dev.package."*"]
 opt-level = 3
