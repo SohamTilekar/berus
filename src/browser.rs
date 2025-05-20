@@ -260,7 +260,25 @@ impl eframe::App for BrowserApp {
             // Tab Bar
             let mut tab_to_close_index: Option<usize> = None; // Keep track of which tab to close
 
+            // Handle keyboard shortcuts for tab management
+            ctx.input_mut(|i| {
+                // Ctrl/Cmd + T: New Tab
+                if i.consume_key(egui::Modifiers::COMMAND, egui::Key::T)
+                    || i.consume_key(egui::Modifiers::CTRL, egui::Key::T)
+                {
+                    self.add_new_tab();
+                }
+                // Ctrl/Cmd + W: Close Active Tab
+                else if (i.consume_key(egui::Modifiers::COMMAND, egui::Key::W)
+                    || i.consume_key(egui::Modifiers::CTRL, egui::Key::W))
+                    && !self.tabs.is_empty()
+                {
+                    tab_to_close_index = Some(self.active_tab_index);
+                }
+            });
+
             ui.horizontal(|ui| {
+                // Tabs and New Tab button
                 for (index, tab) in self.tabs.iter().enumerate() {
                     // Use a shorter, potentially truncated title for the tab button itself
                     let tab_display_title = tab.display_title();
@@ -312,7 +330,17 @@ impl eframe::App for BrowserApp {
                 if ui.button("+").clicked() {
                     self.add_new_tab();
                 }
-            });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Close button
+                    if ui.button("x").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    // Minimize button
+                    if ui.button("-").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+                }); // End of ui.with_layout for window controls
+            }); // End of ui.horizontal for tabs and + button and Minimize, Maximize, & Close button
 
             ui.separator();
 

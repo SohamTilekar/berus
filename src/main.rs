@@ -17,7 +17,10 @@ fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_maximized(true)
-            .with_title("Berus Browser"),
+            .with_title("Berus Browser")
+            .with_decorations(false)
+            .with_titlebar_shown(false)
+            .with_taskbar(false),
         ..Default::default()
     };
 
