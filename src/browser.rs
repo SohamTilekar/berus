@@ -275,6 +275,12 @@ impl eframe::App for BrowserApp {
                 {
                     tab_to_close_index = Some(self.active_tab_index);
                 }
+                // Ctrl/Cmd + Q: Close Browser
+                else if i.consume_key(egui::Modifiers::COMMAND, egui::Key::Q)
+                    || i.consume_key(egui::Modifiers::CTRL, egui::Key::Q)
+                {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             });
 
             ui.horizontal(|ui| {
