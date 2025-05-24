@@ -1,8 +1,9 @@
 // browser.rs
-use crate::html_parser::{self};
-use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
+use crate::html_parser;
+use crate::layout::{self, AudioPlayer, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
 use eframe::egui;
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 
@@ -10,7 +11,6 @@ use std::thread;
 const BASE_SIZE: f32 = 16.0; // Default font size
 
 // --- NEW: Tab State ---
-#[derive(Clone, Debug)]
 enum ContentState {
     Idle,
     Loading(String), // URL being loaded
@@ -21,12 +21,12 @@ enum ContentState {
     },
 }
 
-#[derive(Clone, Debug)]
 struct TabState {
     id: usize, // Unique identifier for the tab
     title: String,
     url_input: String, // URL currently in the address bar for this tab
     content_state: ContentState,
+    audio_player: HashMap<String, AudioPlayer>,
 }
 
 impl TabState {
@@ -36,6 +36,7 @@ impl TabState {
             title: "New Tab".to_string(),
             url_input: "".to_string(),
             content_state: ContentState::Idle,
+            audio_player: HashMap::new(),
         }
     }
 
@@ -150,10 +151,6 @@ impl BrowserApp {
         app
     }
 
-    fn get_active_tab_mut(&mut self) -> Option<&mut TabState> {
-        self.tabs.get_mut(self.active_tab_index)
-    }
-
     fn start_loading(&mut self, tab_index: usize, url_str: String) {
         if let Some(tab) = self.tabs.get_mut(tab_index) {
             if !url_str.starts_with("http://") && !url_str.starts_with("https://") {
@@ -248,7 +245,7 @@ impl eframe::App for BrowserApp {
             Err(mpsc::TryRecvError::Disconnected) => {
                 eprintln!("Network channel disconnected!");
                 // Optionally show an error in the active tab?
-                if let Some(tab) = self.get_active_tab_mut() {
+                if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
                     tab.content_state =
                         ContentState::Error("Internal communication error.".to_string());
                 }
@@ -387,33 +384,44 @@ impl eframe::App for BrowserApp {
         // --- Central Panel: Content Display for Active Tab ---
         egui::CentralPanel::default().show(ctx, |ui| {
             // pull out a reference to the tab once…
-            if let Some(tab) = self.tabs.get(self.active_tab_index) {
-                match &tab.content_state {
+            if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
+                match &mut tab.content_state {
                     ContentState::Idle => {
                         ui.label("Enter a URL above and click 'Go' or press Enter.");
-                        return; // <— drop the borrow of `tab` immediately
+                        return;
                     }
                     ContentState::Loading(url) => {
                         ui.label(format!("Loading {}...", url));
                         ui.spinner();
-                        return; // <— borrow ends here
+                        return;
                     }
                     ContentState::Error(err) => {
                         ui.colored_label(egui::Color32::RED, err);
-                        return; // <— borrow ends here
+                        return;
                     }
                     ContentState::Loaded { root_node, .. } => {
-                        // we still have an immutable borrow on `tab` until the end of this block…
-                        let body = match root_node.get_body() {
-                            Some(b) => b.clone(), // clone it out
-                            None => return,
-                        };
-                        let mut initial_context = RenderContext::default();
-                        // now do the scroll area; we only capture `body` (owned) and `self`
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            render_node(self, ui, &body, &mut initial_context);
-                            ui.allocate_space(ui.available_size());
-                        });
+                        // Move the children out of the root_node
+                        let mut children = std::mem::take(&mut root_node.children);
+
+                        // Now we can release the borrow of `tab` and reuse `self`
+                        let _ = tab;
+
+                        for mut body in &mut children {
+                            if let NodeType::Element(HtmlTag::Body) = body.node_type {
+                                let mut initial_context = RenderContext::default();
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    render_node(self, ui, ctx, &mut body, &mut initial_context);
+                                    ui.allocate_space(ui.available_size());
+                                });
+                            }
+                        }
+
+                        // Put the children back into root_node
+                        if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
+                            if let ContentState::Loaded { root_node, .. } = &mut tab.content_state {
+                                root_node.children = children;
+                            }
+                        }
                     }
                 }
             } else {
@@ -507,10 +515,11 @@ fn is_inline(node: &HtmlNode) -> bool {
     }
 }
 
-fn set_node(
-    browser: &mut BrowserApp,
+fn set_node<'a>(
+    browser: &'a mut BrowserApp,
     ui: &mut egui::Ui,
-    node: &HtmlNode,
+    egui_ctx: &egui::Context,
+    node: &'a mut HtmlNode,
     context: &mut RenderContext,
 ) -> egui::Frame {
     match &node.node_type {
@@ -643,6 +652,35 @@ fn set_node(
                         browser.add_new_tab();
                         browser.start_loading(browser.active_tab_index, href.clone());
                     }
+                }
+            }
+        }
+        NodeType::Element(HtmlTag::Audio) => {
+            if let Some(src) = node.attributes.get("src") {
+                let api = "audio player id".to_string();
+                if let None = node.attributes.get(&api) {
+                    if let Ok(audio_player) = AudioPlayer::new(
+                        src.clone(),
+                        node.attributes.contains_key("autoplay"),
+                        node.attributes.contains_key("loop"),
+                        node.attributes.contains_key("controls"),
+                    ) {
+                        node.attributes.insert(api.clone(), audio_player.id.clone());
+                        if let Some(tab) = browser.tabs.get_mut(browser.active_tab_index) {
+                            tab.audio_player
+                                .insert(audio_player.id.clone(), audio_player);
+                        }
+                    }
+                }
+                if let Some(Some(audio_player)) = node.attributes.get(&api).map(|id| {
+                    if let Some(tab) = browser.tabs.get_mut(browser.active_tab_index) {
+                        return tab.audio_player.get(id);
+                    }
+                    None
+                }) {
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        audio_player.ui(ui, egui_ctx);
+                    });
                 }
             }
         }
@@ -842,13 +880,14 @@ fn set_node(
     frame
 }
 
-fn render_node(
-    browser: &mut BrowserApp,
+fn render_node<'a>(
+    browser: &'a mut BrowserApp,
     ui: &mut egui::Ui,
-    node: &HtmlNode,
+    egui_ctx: &egui::Context,
+    node: &'a mut HtmlNode,
     context: &mut RenderContext,
 ) {
-    let frame = set_node(browser, ui, node, context);
+    let frame = set_node(browser, ui, egui_ctx, node, context);
 
     if frame != egui::Frame::default() {
         frame.show(ui, |ui| {
@@ -863,15 +902,15 @@ fn render_node(
                         let old_item_spacing = ui.style().spacing.item_spacing;
                         ui.style_mut().spacing.item_spacing.x = 7.;
                         ui.horizontal_wrapped(|ui| {
-                            for child in &node.children[start..i] {
-                                let mut ctx = context.clone();
-                                render_inline(browser, ui, child, &mut ctx);
+                            for child in &mut node.children[start..i] {
+                                let mut context = context.clone();
+                                render_inline(browser, ui, egui_ctx, child, &mut context);
                             }
                         });
                         ui.style_mut().spacing.item_spacing = old_item_spacing;
                     } else {
-                        let mut ctx = context.clone();
-                        render_node(browser, ui, &node.children[i], &mut ctx);
+                        let mut context = context.clone();
+                        render_node(browser, ui, egui_ctx, &mut node.children[i], &mut context);
                         i += 1;
                     }
                 }
@@ -888,28 +927,29 @@ fn render_node(
                 let old_item_spacing = ui.style().spacing.item_spacing;
                 ui.style_mut().spacing.item_spacing.x = 7.;
                 ui.horizontal_wrapped(|ui| {
-                    for child in &node.children[start..i] {
-                        let mut ctx = context.clone();
-                        render_inline(browser, ui, child, &mut ctx);
+                    for child in &mut node.children[start..i] {
+                        let mut context = context.clone();
+                        render_inline(browser, ui, egui_ctx, child, &mut context);
                     }
                 });
                 ui.style_mut().spacing.item_spacing = old_item_spacing;
             } else {
-                let mut ctx = context.clone();
-                render_node(browser, ui, &node.children[i], &mut ctx);
+                let mut context = context.clone();
+                render_node(browser, ui, egui_ctx, &mut node.children[i], &mut context);
                 i += 1;
             }
         }
     }
 }
 
-fn render_inline(
-    browser: &mut BrowserApp,
+fn render_inline<'a>(
+    browser: &'a mut BrowserApp,
     ui: &mut egui::Ui,
-    node: &HtmlNode,
+    egui_ctx: &egui::Context,
+    node: &'a mut HtmlNode,
     context: &mut RenderContext,
 ) {
-    let frame = set_node(browser, ui, node, context);
+    let frame = set_node(browser, ui, egui_ctx, node, context);
 
     if frame != egui::Frame::default() {
         frame.show(ui, |ui| {
@@ -917,8 +957,8 @@ fn render_inline(
                 let mut i = 0;
                 while i < node.children.len() {
                     if is_inline(&node.children[i]) {
-                        let mut ctx = context.clone();
-                        render_inline(browser, ui, &node.children[i], &mut ctx);
+                        let mut context = context.clone();
+                        render_inline(browser, ui, egui_ctx, &mut node.children[i], &mut context);
                         i += 1;
                     } else {
                         let start = i;
@@ -926,9 +966,9 @@ fn render_inline(
                             i += 1;
                         }
                         ui.vertical(|ui| {
-                            for child in &node.children[start..i] {
-                                let mut ctx = context.clone();
-                                render_node(browser, ui, child, &mut ctx);
+                            for child in &mut node.children[start..i] {
+                                let mut context = context.clone();
+                                render_node(browser, ui, egui_ctx, child, &mut context);
                             }
                         });
                     }
@@ -939,8 +979,8 @@ fn render_inline(
         let mut i = 0;
         while i < node.children.len() {
             if is_inline(&node.children[i]) {
-                let mut ctx = context.clone();
-                render_inline(browser, ui, &node.children[i], &mut ctx);
+                let mut context = context.clone();
+                render_inline(browser, ui, egui_ctx, &mut node.children[i], &mut context);
                 i += 1;
             } else {
                 let start = i;
@@ -948,9 +988,9 @@ fn render_inline(
                     i += 1;
                 }
                 ui.vertical(|ui| {
-                    for child in &node.children[start..i] {
-                        let mut ctx = context.clone();
-                        render_node(browser, ui, child, &mut ctx);
+                    for child in &mut node.children[start..i] {
+                        let mut context = context.clone();
+                        render_node(browser, ui, egui_ctx, child, &mut context);
                     }
                 });
             }

@@ -660,6 +660,7 @@ impl<'a> Parser<'a> {
             "big" => HtmlTag::Big,
             "br" => HtmlTag::Br,
             "img" => HtmlTag::Img,
+            "audio" => HtmlTag::Audio,
             "body" => HtmlTag::Body,
             "head" => HtmlTag::Head,
             "html" => HtmlTag::Html,
