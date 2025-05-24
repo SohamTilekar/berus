@@ -1,6 +1,7 @@
 // browser.rs
+use crate::audio_player::AudioPlayer;
 use crate::html_parser;
-use crate::layout::{self, AudioPlayer, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
+use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
 use eframe::egui;
 use std::collections::HashMap;
@@ -678,9 +679,7 @@ fn set_node<'a>(
                     }
                     None
                 }) {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        audio_player.ui(ui, egui_ctx);
-                    });
+                    audio_player.ui(ui, egui_ctx);
                 }
             }
         }

@@ -4,6 +4,7 @@ mod css_parser;
 mod html_parser;
 mod layout;
 mod network;
+mod audio_player;
 
 use browser::BrowserApp;
 use eframe::egui;
