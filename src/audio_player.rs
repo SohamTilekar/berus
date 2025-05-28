@@ -5,18 +5,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::layout::get_next_id;
 use anyhow::Result;
 use eframe::egui;
 use reqwest;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static COUNTER: AtomicUsize = AtomicUsize::new(1);
-
-fn get_next_id() -> usize {
-    COUNTER.fetch_add(1, Ordering::Relaxed)
-}
 
 pub struct AudioPlayer {
     pub id: String,

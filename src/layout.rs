@@ -1,5 +1,12 @@
 use eframe::egui::Color32;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+pub fn get_next_id() -> usize {
+    COUNTER.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone)]
 pub enum HtmlTag {
@@ -27,6 +34,14 @@ pub enum HtmlTag {
     Abbr, // Abbreviation tag
     Audio,
     Img,
+    Table, // Table tag
+    Thead,
+    Tbody,
+    Tfoot,
+    Th,      // Table header cell tag
+    Td,      // Table data cell tag
+    Tr,      // Table row tag
+    Caption, // Table caption tag
     Body,
     Head,
     Title,
@@ -329,6 +344,14 @@ impl HtmlNode {
                         HtmlTag::Abbr => s_lower == "abbr",
                         HtmlTag::Img => s_lower == "img",
                         HtmlTag::Audio => s_lower == "audio",
+                        HtmlTag::Table => s_lower == "table",
+                        HtmlTag::Thead => s_lower == "thead",
+                        HtmlTag::Tbody => s_lower == "tbody",
+                        HtmlTag::Tfoot => s_lower == "tfoot",
+                        HtmlTag::Th => s_lower == "th",
+                        HtmlTag::Td => s_lower == "td",
+                        HtmlTag::Tr => s_lower == "tr",
+                        HtmlTag::Caption => s_lower == "caption",
                         HtmlTag::Body => s_lower == "body",
                         HtmlTag::Head => s_lower == "head",
                         HtmlTag::Title => s_lower == "title",

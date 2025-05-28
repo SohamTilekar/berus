@@ -4,6 +4,7 @@ use crate::html_parser;
 use crate::layout::{self, HtmlNode, HtmlTag, NodeType}; // Import layout definitions
 use crate::network;
 use eframe::egui;
+use egui_extras;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
@@ -118,6 +119,7 @@ pub struct BrowserApp {
         mpsc::Receiver<Result<(usize, String, String, HtmlNode), (usize, String, String)>>,
     network_sender:
         mpsc::Sender<Result<(usize, String, String, HtmlNode), (usize, String, String)>>,
+    // network_manager: network::NetworkManager,
 }
 
 impl BrowserApp {
@@ -143,6 +145,7 @@ impl BrowserApp {
             next_tab_id,
             network_receiver: receiver,
             network_sender: sender,
+            // network_manager: network::NetworkManager::new(),
         };
         // Trigger initial load if URL was provided
         if !app.tabs[0].url_input.is_empty() {
@@ -182,7 +185,7 @@ impl BrowserApp {
                         // Optionally print the tree for debugging
                         html_parser::print_tree(&root_node);
                         sender
-                            .send(Ok((tab_id, url_to_load, body, root_node))) // Send tab_id, url, body, node
+                            .send(Ok((tab_id, url_to_load, body.to_string(), root_node))) // Send tab_id, url, body, node
                             .unwrap_or_else(|e| eprintln!("Failed to send success result: {}", e));
                     }
                     Err(e) => {
@@ -212,7 +215,7 @@ impl BrowserApp {
 
 impl eframe::App for BrowserApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ctx.set_debug_on_hover(true);
+        ctx.set_debug_on_hover(true);
         // --- Receive Network Results ---
         match self.network_receiver.try_recv() {
             Ok(Ok((tab_id, loaded_url, _, root_node))) => {
@@ -523,183 +526,6 @@ fn set_node<'a>(
     node: &'a mut HtmlNode,
     context: &mut RenderContext,
 ) -> egui::Frame {
-    match &node.node_type {
-        NodeType::Text(text) => {
-            let mut rich = egui::RichText::new(text).size(context.font_size);
-            if context.bold {
-                rich = rich.strong();
-            }
-            if context.week {
-                rich = rich.weak();
-            }
-            if context.italic {
-                rich = rich.italics();
-            }
-            if context.underline {
-                rich = rich.underline();
-            }
-            if context.strikethrough {
-                rich = rich.strikethrough();
-            }
-            if let Some(ts) = &context.text_style {
-                rich = rich.text_style(ts.clone());
-            }
-            if let Some(ff) = &context.font_family {
-                rich = rich.family(ff.clone());
-            }
-            if let Some(c) = &context.text_color {
-                rich = rich.color(c.clone().to_ecolor());
-            }
-            let mut label = egui::Label::new(rich);
-            if let Some(_) = &context.href {
-                label = label.sense(egui::Sense::click());
-            }
-            let mut response = ui.add(label);
-            if let Some(href) = &context.href {
-                response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                if response.clicked() {
-                    browser.add_new_tab();
-                    browser.start_loading(browser.active_tab_index, href.clone());
-                }
-            }
-            if let Some(title) = &context.abbr {
-                response.on_hover_text(title);
-            }
-        }
-        NodeType::Element(HtmlTag::Br) => ui.end_row(),
-        NodeType::Element(HtmlTag::Hr) => {
-            ui.separator();
-        }
-        NodeType::Element(HtmlTag::Big) => {
-            context.font_size *= 1.2;
-        }
-        NodeType::Element(HtmlTag::Small) => {
-            context.font_size *= 0.8;
-        }
-        NodeType::Element(HtmlTag::W) => context.week = true,
-        NodeType::Element(HtmlTag::Strong | HtmlTag::B) => context.bold = true,
-        NodeType::Element(HtmlTag::Em | HtmlTag::I) => context.italic = true,
-        NodeType::Element(HtmlTag::S) => context.strikethrough = true,
-        NodeType::Element(HtmlTag::U) => context.underline = true,
-        NodeType::Element(HtmlTag::A) => {
-            if let Some(href) = node.attributes.get("href") {
-                context.text_color = Some(layout::Color::Rgb(127, 127, 255));
-                context.underline = true;
-                context.href = Some(href.clone());
-            }
-        }
-        NodeType::Element(HtmlTag::Abbr) => {
-            if let Some(title) = node.attributes.get("title") {
-                context.abbr = Some(title.clone());
-            }
-        }
-        NodeType::Element(HtmlTag::Img) => {
-            if let Some(src) = node.attributes.get("src") {
-                // Get the image from the network
-                let mut image =
-                    egui::Image::new(egui::ImageSource::Uri(std::borrow::Cow::Owned(src.clone())));
-
-                // Try parsing width and height from attributes
-                let width = node
-                    .attributes
-                    .get("width")
-                    .and_then(|w| w.parse::<f32>().ok());
-                let height = node
-                    .attributes
-                    .get("height")
-                    .and_then(|h| h.parse::<f32>().ok());
-
-                // Get the original size to compute aspect ratio if needed
-                if let Some(original_size) = image.size() {
-                    image = image.fit_to_exact_size(match (width, height) {
-                        (Some(w), Some(h)) => egui::Vec2::new(w, h),
-                        (Some(w), None) => {
-                            let h = w * original_size.y / original_size.x;
-                            egui::Vec2::new(w, h)
-                        }
-                        (None, Some(h)) => {
-                            let w = h * original_size.x / original_size.y;
-                            egui::Vec2::new(w, h)
-                        }
-                        (None, None) => original_size,
-                    });
-                } else {
-                    image = image.fit_to_original_size(1.);
-                }
-
-                // Apply hover sense if there’s an alt or href attribute
-                let has_title =
-                    node.attributes.contains_key("alt") || node.attributes.contains_key("title");
-                let is_clickable = context.href.is_some();
-
-                if is_clickable {
-                    image = image.sense(egui::Sense::click()); // ::click() senses both click & hover
-                } else if has_title {
-                    image = image.sense(egui::Sense::hover());
-                }
-
-                let mut response = ui.add(image);
-
-                if let Some(title) = node.attributes.get("title") {
-                    response = response.on_hover_text(egui::RichText::new(title));
-                } else if let Some(alt) = node.attributes.get("alt") {
-                    response = response.on_hover_text(egui::RichText::new(alt));
-                }
-
-                // Handle clicking the image like an anchor
-                if let Some(href) = &context.href {
-                    response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if response.clicked() {
-                        browser.add_new_tab();
-                        browser.start_loading(browser.active_tab_index, href.clone());
-                    }
-                }
-            }
-        }
-        NodeType::Element(HtmlTag::Audio) => {
-            if let Some(src) = node.attributes.get("src") {
-                let api = "audio player id".to_string();
-                if let None = node.attributes.get(&api) {
-                    if let Ok(audio_player) = AudioPlayer::new(
-                        src.clone(),
-                        node.attributes.contains_key("autoplay"),
-                        node.attributes.contains_key("loop"),
-                        node.attributes.contains_key("controls"),
-                    ) {
-                        node.attributes.insert(api.clone(), audio_player.id.clone());
-                        if let Some(tab) = browser.tabs.get_mut(browser.active_tab_index) {
-                            tab.audio_player
-                                .insert(audio_player.id.clone(), audio_player);
-                        }
-                    }
-                }
-                if let Some(Some(audio_player)) = node.attributes.get(&api).map(|id| {
-                    if let Some(tab) = browser.tabs.get_mut(browser.active_tab_index) {
-                        return tab.audio_player.get(id);
-                    }
-                    None
-                }) {
-                    audio_player.ui(ui, egui_ctx);
-                }
-            }
-        }
-        NodeType::Element(tag) => {
-            let scale = match tag {
-                HtmlTag::H1 => Some(2.0),
-                HtmlTag::H2 => Some(1.8),
-                HtmlTag::H3 => Some(1.6),
-                HtmlTag::H4 => Some(1.4),
-                HtmlTag::H5 => Some(1.2),
-                HtmlTag::H6 => Some(1.1),
-                _ => None,
-            };
-
-            if let Some(scale) = scale {
-                context.text_style = Some(egui::TextStyle::Heading);
-                context.font_size *= scale;
-            }
-        }
-    }
     // Initialize mutable frame properties
     let mut inner_margin = egui::Margin::default();
     let mut outer_margin = egui::Margin::default();
@@ -876,6 +702,345 @@ fn set_node<'a>(
         .corner_radius(rounding)
         .fill(fill);
 
+    match &node.node_type {
+        NodeType::Text(text) => {
+            let mut rich = egui::RichText::new(text).size(context.font_size);
+            if context.bold {
+                rich = rich.strong();
+            }
+            if context.week {
+                rich = rich.weak();
+            }
+            if context.italic {
+                rich = rich.italics();
+            }
+            if context.underline {
+                rich = rich.underline();
+            }
+            if context.strikethrough {
+                rich = rich.strikethrough();
+            }
+            if let Some(ts) = &context.text_style {
+                rich = rich.text_style(ts.clone());
+            }
+            if let Some(ff) = &context.font_family {
+                rich = rich.family(ff.clone());
+            }
+            if let Some(c) = &context.text_color {
+                rich = rich.color(c.clone().to_ecolor());
+            }
+            let mut label = egui::Label::new(rich);
+            if let Some(_) = &context.href {
+                label = label.sense(egui::Sense::click());
+            }
+            let mut response = ui.add(label);
+            if let Some(href) = &context.href {
+                response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.clicked() {
+                    browser.add_new_tab();
+                    browser.start_loading(browser.active_tab_index, href.clone());
+                }
+            }
+            if let Some(title) = &context.abbr {
+                response.on_hover_text(title);
+            }
+        }
+        NodeType::Element(HtmlTag::Br) => ui.end_row(),
+        NodeType::Element(HtmlTag::Hr) => {
+            ui.separator();
+        }
+        NodeType::Element(HtmlTag::Big) => {
+            context.font_size *= 1.2;
+        }
+        NodeType::Element(HtmlTag::Small) => {
+            context.font_size *= 0.8;
+        }
+        NodeType::Element(HtmlTag::W) => context.week = true,
+        NodeType::Element(HtmlTag::Strong | HtmlTag::B) => context.bold = true,
+        NodeType::Element(HtmlTag::Em | HtmlTag::I) => context.italic = true,
+        NodeType::Element(HtmlTag::S) => context.strikethrough = true,
+        NodeType::Element(HtmlTag::U) => context.underline = true,
+        NodeType::Element(HtmlTag::A) => {
+            if let Some(href) = node.attributes.get("href") {
+                context.text_color = Some(layout::Color::Rgb(127, 127, 255));
+                context.underline = true;
+                context.href = Some(href.clone());
+            }
+        }
+        NodeType::Element(HtmlTag::Abbr) => {
+            if let Some(title) = node.attributes.get("title") {
+                context.abbr = Some(title.clone());
+            }
+        }
+        NodeType::Element(HtmlTag::Img) => {
+            if let Some(src) = node.attributes.get("src") {
+                // Get the image from the network
+                let mut image =
+                    egui::Image::new(egui::ImageSource::Uri(std::borrow::Cow::Owned(src.clone())));
+                // Try parsing width and height from attributes
+                let width = node
+                    .attributes
+                    .get("width")
+                    .and_then(|w| w.parse::<f32>().ok());
+                let height = node
+                    .attributes
+                    .get("height")
+                    .and_then(|h| h.parse::<f32>().ok());
+
+                // Get the original size to compute aspect ratio if needed
+                if let Some(original_size) = image.size() {
+                    image = image.fit_to_exact_size(match (width, height) {
+                        (Some(w), Some(h)) => egui::Vec2::new(w, h),
+                        (Some(w), None) => {
+                            let h = w * original_size.y / original_size.x;
+                            egui::Vec2::new(w, h)
+                        }
+                        (None, Some(h)) => {
+                            let w = h * original_size.x / original_size.y;
+                            egui::Vec2::new(w, h)
+                        }
+                        (None, None) => original_size,
+                    });
+                } else {
+                    image = image.fit_to_original_size(1.);
+                }
+
+                // Apply hover sense if there’s an alt or href attribute
+                let has_title =
+                    node.attributes.contains_key("alt") || node.attributes.contains_key("title");
+                let is_clickable = context.href.is_some();
+
+                if is_clickable {
+                    image = image.sense(egui::Sense::click()); // ::click() senses both click & hover
+                } else if has_title {
+                    image = image.sense(egui::Sense::hover());
+                }
+
+                let mut response = ui.add(image);
+
+                if let Some(title) = node.attributes.get("title") {
+                    response = response.on_hover_text(egui::RichText::new(title));
+                } else if let Some(alt) = node.attributes.get("alt") {
+                    response = response.on_hover_text(egui::RichText::new(alt));
+                }
+
+                // Handle clicking the image like an anchor
+                if let Some(href) = &context.href {
+                    response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if response.clicked() {
+                        browser.add_new_tab();
+                        browser.start_loading(browser.active_tab_index, href.clone());
+                    }
+                }
+            }
+        }
+        NodeType::Element(HtmlTag::Audio) => {
+            if let Some(src) = node.attributes.get("src") {
+                let api = "audio player id".to_string();
+                if let None = node.attributes.get(&api) {
+                    if let Ok(audio_player) = AudioPlayer::new(
+                        src.clone(),
+                        node.attributes.contains_key("autoplay"),
+                        node.attributes.contains_key("loop"),
+                        node.attributes.contains_key("controls"),
+                    ) {
+                        node.attributes.insert(api.clone(), audio_player.id.clone());
+                        if let Some(tab) = browser.tabs.get_mut(browser.active_tab_index) {
+                            tab.audio_player
+                                .insert(audio_player.id.clone(), audio_player);
+                        }
+                    }
+                }
+                if let Some(Some(audio_player)) = node.attributes.get(&api).map(|id| {
+                    if let Some(tab) = browser.tabs.get_mut(browser.active_tab_index) {
+                        return tab.audio_player.get(id);
+                    }
+                    None
+                }) {
+                    audio_player.ui(ui, egui_ctx);
+                }
+            }
+        }
+        NodeType::Element(HtmlTag::Table) => {
+            let id: &String;
+            if node.attributes.contains_key("--id--") {
+                if let Some(id_) = node.attributes.get("--id--") {
+                    id = id_;
+                } else {
+                    panic!()
+                }
+            } else {
+                node.attributes
+                    .insert("--id--".to_string(), layout::get_next_id().to_string());
+                if let Some(id_) = node.attributes.get("--id--") {
+                    id = id_;
+                } else {
+                    panic!()
+                }
+            };
+            // 1. Extract (and remove) any <caption> child
+            let mut caption_node: Option<&mut HtmlNode> = None;
+            // 2. Gather all <tr>, <thead>, <tbody>, <tfoot> children into `row_containers`
+            let mut row_containers: Vec<&mut HtmlNode> = Vec::new();
+
+            // Partition children into caption vs. row containers
+            for child in &mut node.children {
+                match child.node_type {
+                    NodeType::Element(HtmlTag::Caption) => {
+                        // We only keep the first caption; if you have multiple captions you can adapt as needed
+                        if caption_node.is_none() {
+                            caption_node = Some(child);
+                        }
+                    }
+                    NodeType::Element(HtmlTag::Tr)
+                    | NodeType::Element(HtmlTag::Thead)
+                    | NodeType::Element(HtmlTag::Tbody)
+                    | NodeType::Element(HtmlTag::Tfoot) => {
+                        row_containers.push(child);
+                    }
+                    _ => {
+                        // ignore anything else (e.g. comment nodes, whitespace, etc.)
+                    }
+                }
+            }
+
+            // 3. Determine column count by looking at the first <tr> we can find
+            let mut max_column_count = 0;
+            for container in &row_containers {
+                match container.node_type {
+                    NodeType::Element(HtmlTag::Tr) => {
+                        let column_count = container
+                            .children
+                            .iter()
+                            .filter(|c| {
+                                matches!(
+                                    c.node_type,
+                                    NodeType::Element(HtmlTag::Th) | NodeType::Element(HtmlTag::Td)
+                                )
+                            })
+                            .count();
+                        if column_count > max_column_count {
+                            max_column_count = column_count;
+                        }
+                    }
+                    NodeType::Element(HtmlTag::Thead)
+                    | NodeType::Element(HtmlTag::Tbody)
+                    | NodeType::Element(HtmlTag::Tfoot) => {
+                        for sub in &container.children {
+                            if let NodeType::Element(HtmlTag::Tr) = sub.node_type {
+                                let column_count = sub
+                                    .children
+                                    .iter()
+                                    .filter(|c| {
+                                        matches!(
+                                            c.node_type,
+                                            NodeType::Element(HtmlTag::Th)
+                                                | NodeType::Element(HtmlTag::Td)
+                                        )
+                                    })
+                                    .count();
+                                if column_count > max_column_count {
+                                    max_column_count = column_count;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // 4. Build a TableBuilder with `column_count` columns.
+            let mut table = egui_extras::TableBuilder::new(ui)
+                .id_salt(id)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+
+            table = table.columns(egui_extras::Column::remainder(), max_column_count);
+
+            table.body(|mut body| {
+                // 5. For each row container, dig into its <tr> children, then render each <th> or <td>
+                for container in row_containers {
+                    match container.node_type {
+                        NodeType::Element(HtmlTag::Tr) => {
+                            // Direct <tr> -> render it as one row
+                            body.row(24.0, |mut row_ui| {
+                                for cell in &mut container.children {
+                                    if matches!(
+                                        cell.node_type,
+                                        NodeType::Element(HtmlTag::Th)
+                                            | NodeType::Element(HtmlTag::Td)
+                                    ) {
+                                        row_ui.col(|ui| {
+                                            // Render the contents of <th> or <td>:
+                                            render_node(
+                                                browser,
+                                                ui,
+                                                egui_ctx,
+                                                &mut cell.clone(),
+                                                &mut context.clone(),
+                                            );
+                                        });
+                                    }
+                                }
+                            });
+                        }
+                        NodeType::Element(HtmlTag::Thead)
+                        | NodeType::Element(HtmlTag::Tbody)
+                        | NodeType::Element(HtmlTag::Tfoot) => {
+                            // If we see a <thead>/<tbody>/<tfoot>, look for nested <tr> children
+                            for sub in &mut container.children {
+                                if let NodeType::Element(HtmlTag::Tr) = sub.node_type {
+                                    body.row(24.0, |mut row_ui| {
+                                        for cell in &mut sub.children {
+                                            if matches!(
+                                                cell.node_type,
+                                                NodeType::Element(HtmlTag::Th)
+                                                    | NodeType::Element(HtmlTag::Td)
+                                            ) {
+                                                row_ui.col(|ui| {
+                                                    render_node(
+                                                        browser,
+                                                        ui,
+                                                        egui_ctx,
+                                                        cell,
+                                                        &mut context.clone(),
+                                                    );
+                                                });
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        _ => {
+                            // ignore any other tags inside table
+                        }
+                    }
+                }
+            });
+
+            // 6. Finally, if there was a <caption>, render it below the table
+            if let Some(mut cap_node) = caption_node {
+                render_node(browser, ui, egui_ctx, &mut cap_node, context);
+            }
+        }
+        NodeType::Element(tag) => {
+            let scale = match tag {
+                HtmlTag::H1 => Some(2.0),
+                HtmlTag::H2 => Some(1.8),
+                HtmlTag::H3 => Some(1.6),
+                HtmlTag::H4 => Some(1.4),
+                HtmlTag::H5 => Some(1.2),
+                HtmlTag::H6 => Some(1.1),
+                _ => None,
+            };
+
+            if let Some(scale) = scale {
+                context.text_style = Some(egui::TextStyle::Heading);
+                context.font_size *= scale;
+            }
+        }
+    }
+
     frame
 }
 
@@ -887,6 +1052,9 @@ fn render_node<'a>(
     context: &mut RenderContext,
 ) {
     let frame = set_node(browser, ui, egui_ctx, node, context);
+    if let NodeType::Element(HtmlTag::Table) = node.node_type {
+        return;
+    }
 
     if frame != egui::Frame::default() {
         frame.show(ui, |ui| {
@@ -949,6 +1117,9 @@ fn render_inline<'a>(
     context: &mut RenderContext,
 ) {
     let frame = set_node(browser, ui, egui_ctx, node, context);
+    if let NodeType::Element(HtmlTag::Table) = node.node_type {
+        return;
+    }
 
     if frame != egui::Frame::default() {
         frame.show(ui, |ui| {

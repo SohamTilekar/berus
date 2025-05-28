@@ -7,7 +7,6 @@ edition = "2024"
 eframe = "0.31.1"
 egui_extras = { version = "0.31.1", features = ["all_loaders"] }
 url = "2.4"                                                      # For URL parsing
-native-tls = "0.2"                                               # For HTTPS/TLS
 reqwest = { version = "0.12.15", features = ["blocking"] }
 anyhow = "1.0.98"
 cpal = "0.15.3"
